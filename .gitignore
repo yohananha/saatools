@@ -1,0 +1,23 @@
+# saatool/ is its own git repo — tracked separately
+saatool/
+
+# Node
+saatool-wails/frontend/node_modules/
+saatool-wails/frontend/dist/
+
+# Go build outputs
+saatool-wails/*.exe
+saatool-wails/saatool-wails
+saatool-android/server/frontend/dist/
+
+# Android generated files
+android/app/libs/*.aar
+android/app/build/
+android/.gradle/
+android/local.properties
+android/**/*.iml
+android/.idea/
+
+# OS
+.DS_Store
+Thumbs.db

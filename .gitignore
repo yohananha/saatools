@@ -1,6 +1,3 @@
-# saatool/ is its own git repo — tracked separately
-saatool/
-
 # Node
 saatool-wails/frontend/node_modules/
 saatool-wails/frontend/dist/

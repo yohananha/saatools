@@ -1,0 +1,4 @@
+[submodule "saatool"]
+	path = saatool
+	url = https://yohananha@github.com/yohananha/saatool.git
+	branch = SaaTool_Android_Desktop

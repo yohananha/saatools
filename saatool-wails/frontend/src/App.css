@@ -291,7 +291,7 @@ html, body, #root {
 
 .book-card {
   position: relative;
-  width: 60px;
+  width: 150px;
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -306,8 +306,8 @@ html, body, #root {
 .book-card:active { transform: translateY(0); }
 
 .book-cover {
-  width: 60px;
-  height: 96px;   /* 1.6 : 1 portrait */
+  width: 150px;
+  height: 240px;  /* 1.6 : 1 portrait */
   display: flex; align-items: center; justify-content: center;
   color: rgba(255,255,255,.85);
   position: relative;
@@ -322,56 +322,65 @@ html, body, #root {
 .book-spine {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  width: 4px;
+  width: 5px;
   background: rgba(255,255,255,.25);
 }
 
 .book-meta {
-  padding: 4px 5px 5px;
+  padding: 8px 10px 10px;
 }
 .book-title {
-  font-size: 9px; font-weight: 600;
-  line-height: 1.25;
-  margin-bottom: 3px;
+  font-size: 12px; font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 6px;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+/* Single bar housing both progress layers */
 .book-progress {
-  margin-top: 2px;
-  height: 2px;
-  border-radius: 1px;
+  position: relative;
+  margin-top: 4px;
+  height: 4px;
+  border-radius: 2px;
   background: var(--border);
   overflow: hidden;
 }
-.book-progress-fill {
+/* Back layer (longer value) */
+.book-progress-back {
+  position: absolute;
+  top: 0; left: 0;
   height: 100%;
-  border-radius: 1px;
-  background: var(--accent);
+  border-radius: 2px;
   transition: width .6s ease;
 }
-.book-progress-read {
-  background: #4caf82;   /* teal-green for reading progress */
+/* Front layer (shorter value) */
+.book-progress-front {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  border-radius: 2px;
+  transition: width .6s ease;
 }
 
 .book-actions {
   position: absolute;
-  top: 4px; right: 4px;
-  display: flex; flex-direction: column; gap: 3px;
+  top: 6px; right: 6px;
+  display: flex; flex-direction: column; gap: 4px;
   opacity: 0;
   transition: opacity var(--transition);
 }
 .book-card:hover .book-actions { opacity: 1; }
 
 .book-action-btn {
-  width: 20px; height: 20px;
+  width: 26px; height: 26px;
   border-radius: 50%;
   background: rgba(0,0,0,.55);
   backdrop-filter: blur(8px);
   border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; color: #fff;
+  font-size: 12px; color: #fff;
   transition: background var(--transition);
 }
 .book-action-btn:hover { background: rgba(0,0,0,.8); }

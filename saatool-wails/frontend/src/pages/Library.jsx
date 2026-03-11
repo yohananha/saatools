@@ -145,15 +145,6 @@ function ImportModal({ onClose, onImported }) {
         {mode === 'epub' && (
           <>
             <div className="form-row">
-              <label>Source language</label>
-              <input
-                className="form-input"
-                placeholder="e.g. English"
-                value={from}
-                onChange={e => setFrom(e.target.value)}
-              />
-            </div>
-            <div className="form-row">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
@@ -165,15 +156,26 @@ function ImportModal({ onClose, onImported }) {
               </label>
             </div>
             {!directRead && (
-              <div className="form-row">
-                <label>Target language</label>
-                <input
-                  className="form-input"
-                  placeholder="e.g. Hebrew"
-                  value={to}
-                  onChange={e => setTo(e.target.value)}
-                />
-              </div>
+              <>
+                <div className="form-row">
+                  <label>Source language</label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. English"
+                    value={from}
+                    onChange={e => setFrom(e.target.value)}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Target language</label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. Hebrew"
+                    value={to}
+                    onChange={e => setTo(e.target.value)}
+                  />
+                </div>
+              </>
             )}
           </>
         )}
@@ -387,16 +389,23 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
 
       <div className="book-meta">
         <div className="book-title">{info.title || info.name}</div>
-        {/* Reading progress bar */}
-        <div className="book-progress" title={`Read: ${readPct}%`}>
-          <div className="book-progress-fill book-progress-read" style={{ width: `${readPct}%` }} />
-        </div>
-        {/* Translation progress bar — hidden for direct-read books */}
-        {!info.direct && (
-          <div className="book-progress" style={{ marginTop: 3 }} title={`Translated: ${transPct}%`}>
-            <div className="book-progress-fill" style={{ width: `${transPct}%` }} />
-          </div>
-        )}
+        {/* Single bar: back layer = longer value, front layer = shorter value */}
+        {(() => {
+          const backPct  = info.direct ? readPct : Math.max(readPct, transPct)
+          const frontPct = info.direct ? 0        : Math.min(readPct, transPct)
+          // back is whichever metric is larger; determine its colour
+          const backColor  = (!info.direct && transPct >= readPct) ? 'var(--accent)' : '#4caf82'
+          const frontColor = backColor === '#4caf82' ? 'var(--accent)' : '#4caf82'
+          return (
+            <div className="book-progress"
+              title={info.direct ? `Read: ${readPct}%` : `Read: ${readPct}% · Translated: ${transPct}%`}>
+              <div className="book-progress-back"  style={{ width: `${backPct}%`,  background: backColor }} />
+              {frontPct > 0 && (
+                <div className="book-progress-front" style={{ width: `${frontPct}%`, background: frontColor }} />
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       <div className="book-actions">

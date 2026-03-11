@@ -282,11 +282,11 @@ html, body, #root {
 .filter-check-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .book-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 150px);
   gap: 10px;
   padding: 14px 16px 24px;
-  align-content: flex-start;
+  justify-content: center;
 }
 
 .book-card {
@@ -300,7 +300,6 @@ html, body, #root {
   cursor: pointer;
   transition: transform var(--transition), box-shadow var(--transition);
   user-select: none;
-  flex-shrink: 0;
 }
 .book-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
 .book-card:active { transform: translateY(0); }

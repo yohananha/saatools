@@ -234,8 +234,9 @@ func (a *App) LoadProject(projectPath string) (*ProjectInfo, error) {
 }
 
 // ImportEPUB converts an EPUB file into a new project.
-func (a *App) ImportEPUB(epubPath, from, to string) (*ProjectInfo, error) {
-	p, err := actions.ImportEPUBFile(epubPath, from, to)
+// If direct is true the book is imported for reading as-is (no translation needed).
+func (a *App) ImportEPUB(epubPath, from, to string, direct bool) (*ProjectInfo, error) {
+	p, err := actions.ImportEPUBFile(epubPath, from, to, direct)
 	if err != nil {
 		return nil, fmt.Errorf("failed to import EPUB: %w", err)
 	}

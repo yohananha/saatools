@@ -203,6 +203,7 @@ func (s *Server) handleImportEPUB(w http.ResponseWriter, r *http.Request) {
 
 	sourceLang := r.FormValue("sourceLang")
 	targetLang := r.FormValue("targetLang")
+	direct := r.FormValue("direct") == "true"
 
 	// Save to temp file preserving .epub extension
 	tmp, err := os.CreateTemp(appTempDir(), "import-*"+filepath.Ext(header.Filename))
@@ -220,7 +221,7 @@ func (s *Server) handleImportEPUB(w http.ResponseWriter, r *http.Request) {
 	}
 	tmp.Close()
 
-	info, err := s.app.ImportEPUB(tmpPath, sourceLang, targetLang)
+	info, err := s.app.ImportEPUB(tmpPath, sourceLang, targetLang, direct)
 	if err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return

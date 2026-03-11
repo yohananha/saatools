@@ -263,8 +263,8 @@ func (a *App) LoadProject(projectPath string) (ProjectInfo, error) {
 	return projectToInfo(projectPath, p), nil
 }
 
-func (a *App) ImportEPUB(epubPath, from, to string) (ProjectInfo, error) {
-	p, err := actions.ImportEPUBFile(epubPath, from, to)
+func (a *App) ImportEPUB(epubPath, from, to string, direct bool) (ProjectInfo, error) {
+	p, err := actions.ImportEPUBFile(epubPath, from, to, direct)
 	if err != nil {
 		return ProjectInfo{}, fmt.Errorf("failed to import EPUB: %w", err)
 	}

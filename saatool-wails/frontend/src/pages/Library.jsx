@@ -48,12 +48,13 @@ function coverColors(name) {
 
 // ── Import Modal ───────────────────────────────────────────────────────────
 function ImportModal({ onClose, onImported }) {
-  const [mode,    setMode]    = useState('epub')  // 'epub' | 'spz'
-  const [path,    setPath]    = useState('')       // display name (or Wails path)
-  const [fileObj, setFileObj] = useState(null)     // File object in web mode
-  const [from,    setFrom]    = useState('')
-  const [to,      setTo]      = useState('')
-  const [busy,    setBusy]    = useState(false)
+  const [mode,       setMode]       = useState('epub')  // 'epub' | 'spz'
+  const [path,       setPath]       = useState('')       // display name (or Wails path)
+  const [fileObj,    setFileObj]    = useState(null)     // File object in web mode
+  const [from,       setFrom]       = useState('')
+  const [to,         setTo]         = useState('')
+  const [directRead, setDirectRead] = useState(false)   // import without translation
+  const [busy,       setBusy]       = useState(false)
   const fileInputRef = useRef(null)
 
   // Pre-fill with default languages from settings
@@ -86,7 +87,7 @@ function ImportModal({ onClose, onImported }) {
       // In Wails mode pass the path string; in web mode pass the File object
       const arg = isWails() ? path : fileObj
       if (mode === 'epub') {
-        info = await ImportEPUB(arg, from, to)
+        info = await ImportEPUB(arg, from, directRead ? from : to, directRead)
       } else {
         info = await ImportProjectFile(arg)
       }
@@ -153,14 +154,27 @@ function ImportModal({ onClose, onImported }) {
               />
             </div>
             <div className="form-row">
-              <label>Target language</label>
-              <input
-                className="form-input"
-                placeholder="e.g. Hebrew"
-                value={to}
-                onChange={e => setTo(e.target.value)}
-              />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={directRead}
+                  onChange={e => setDirectRead(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                Read as-is (no translation)
+              </label>
             </div>
+            {!directRead && (
+              <div className="form-row">
+                <label>Target language</label>
+                <input
+                  className="form-input"
+                  placeholder="e.g. Hebrew"
+                  value={to}
+                  onChange={e => setTo(e.target.value)}
+                />
+              </div>
+            )}
           </>
         )}
 

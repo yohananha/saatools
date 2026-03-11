@@ -80,12 +80,13 @@ export const GetProjectCover = (path) =>
  * In Wails mode: filePath is a string (from OpenEPUBDialog).
  * In web mode:  filePath is a File object (from <input type="file">).
  */
-export const ImportEPUB = (filePath, sourceLang, targetLang) => {
-  if (isWails()) return WailsApp.ImportEPUB(filePath, sourceLang, targetLang)
+export const ImportEPUB = (filePath, sourceLang, targetLang, direct = false) => {
+  if (isWails()) return WailsApp.ImportEPUB(filePath, sourceLang, targetLang, direct)
   const fd = new FormData()
   fd.append('file', filePath)
   fd.append('sourceLang', sourceLang)
   fd.append('targetLang', targetLang)
+  fd.append('direct', direct ? 'true' : 'false')
   return apiFetch('POST', '/api/projects/import-epub', fd)
 }
 

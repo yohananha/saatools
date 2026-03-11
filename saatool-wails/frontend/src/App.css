@@ -282,15 +282,17 @@ html, body, #root {
 .filter-check-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .book-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 18px;
-  padding: 16px 24px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px 24px;
+  align-content: flex-start;
 }
 
 .book-card {
   position: relative;
-  border-radius: var(--radius-md);
+  width: 60px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
@@ -298,80 +300,81 @@ html, body, #root {
   cursor: pointer;
   transition: transform var(--transition), box-shadow var(--transition);
   user-select: none;
+  flex-shrink: 0;
 }
-.book-card:hover { transform: translateY(-4px); box-shadow: 0 10px 40px rgba(0,0,0,.28); }
+.book-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
 .book-card:active { transform: translateY(0); }
 
 .book-cover {
-  height: 140px;
+  width: 60px;
+  height: 96px;   /* 1.6 : 1 portrait */
   display: flex; align-items: center; justify-content: center;
-  font-size: 40px;
   color: rgba(255,255,255,.85);
   position: relative;
+  overflow: hidden;
 }
 .book-cover::after {
   content: '';
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, transparent 60%, rgba(0,0,0,.28) 100%);
+  background: linear-gradient(180deg, transparent 55%, rgba(0,0,0,.32) 100%);
 }
 
 .book-spine {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  width: 5px;
+  width: 4px;
   background: rgba(255,255,255,.25);
 }
 
 .book-meta {
-  padding: 10px 12px 12px;
+  padding: 4px 5px 5px;
 }
 .book-title {
-  font-size: 13px; font-weight: 600;
-  line-height: 1.3;
-  margin-bottom: 4px;
+  font-size: 9px; font-weight: 600;
+  line-height: 1.25;
+  margin-bottom: 3px;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
-.book-langs {
-  font-size: 11px; color: var(--fg-muted);
-  display: flex; align-items: center; gap: 4px;
-}
 .book-progress {
-  margin-top: 8px;
-  height: 3px;
-  border-radius: 2px;
+  margin-top: 2px;
+  height: 2px;
+  border-radius: 1px;
   background: var(--border);
   overflow: hidden;
 }
 .book-progress-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 1px;
   background: var(--accent);
   transition: width .6s ease;
+}
+.book-progress-read {
+  background: #4caf82;   /* teal-green for reading progress */
 }
 
 .book-actions {
   position: absolute;
-  top: 8px; right: 8px;
-  display: flex; gap: 4px;
+  top: 4px; right: 4px;
+  display: flex; flex-direction: column; gap: 3px;
   opacity: 0;
   transition: opacity var(--transition);
 }
 .book-card:hover .book-actions { opacity: 1; }
 
 .book-action-btn {
-  width: 28px; height: 28px;
+  width: 20px; height: 20px;
   border-radius: 50%;
-  background: rgba(0,0,0,.5);
+  background: rgba(0,0,0,.55);
   backdrop-filter: blur(8px);
   border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; color: #fff;
+  font-size: 10px; color: #fff;
   transition: background var(--transition);
 }
-.book-action-btn:hover { background: rgba(0,0,0,.75); }
+.book-action-btn:hover { background: rgba(0,0,0,.8); }
 
 .empty-library {
   flex: 1;

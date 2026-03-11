@@ -341,7 +341,9 @@ function BookInfoModal({ info, onClose }) {
 function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
   const [dark, light]  = coverColors(info.name)
   const [coverSrc, setCoverSrc] = useState(null)   // null = loading, '' = none, 'data:...' = found
-  const pct = info.total > 0 ? Math.round((info.translated / info.total) * 100) : 0
+
+  const readPct  = info.total > 0 ? Math.round((info.readAt  / info.total) * 100) : 0
+  const transPct = info.total > 0 ? Math.round((info.translated / info.total) * 100) : 0
 
   // Lazy-load the cover image
   useEffect(() => {
@@ -376,8 +378,8 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
           <>
             <div className="book-spine" />
             {coverSrc === null
-              ? <span style={{ fontSize: 20, opacity: 0.5 }}>⋯</span>  /* loading */
-              : <span style={{ fontSize: 36 }}>📖</span>               /* no cover */
+              ? <span style={{ fontSize: 10, opacity: 0.5 }}>⋯</span>
+              : <span style={{ fontSize: 22 }}>📖</span>
             }
           </>
         )}
@@ -385,17 +387,16 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
 
       <div className="book-meta">
         <div className="book-title">{info.title || info.name}</div>
-        <div className="book-langs">
-          <span>{info.sourceLang || '?'}</span>
-          <span>→</span>
-          <span>{info.targetLang || '?'}</span>
+        {/* Reading progress bar */}
+        <div className="book-progress" title={`Read: ${readPct}%`}>
+          <div className="book-progress-fill book-progress-read" style={{ width: `${readPct}%` }} />
         </div>
-        <div className="book-progress">
-          <div className="book-progress-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
-          {pct}% translated · {info.translated}/{info.total}
-        </div>
+        {/* Translation progress bar — hidden for direct-read books */}
+        {!info.direct && (
+          <div className="book-progress" style={{ marginTop: 3 }} title={`Translated: ${transPct}%`}>
+            <div className="book-progress-fill" style={{ width: `${transPct}%` }} />
+          </div>
+        )}
       </div>
 
       <div className="book-actions">
@@ -404,11 +405,6 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
           title="Book details"
           onClick={e => { e.stopPropagation(); onInfo(info) }}
         >ℹ</button>
-        <button
-          className="book-action-btn"
-          title="Export"
-          onClick={e => { e.stopPropagation(); onExport(info) }}
-        >⬇</button>
         <button
           className="book-action-btn"
           title="Delete"

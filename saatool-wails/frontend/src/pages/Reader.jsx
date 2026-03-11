@@ -499,9 +499,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const paragraphTexts = Object.fromEntries(paragraphs.map(p => [p.index, p.text]))
 
   // ── Progress ──────────────────────────────────────────────────────────────
-  const total    = paragraphs[0]?.total ?? project.total ?? 1
-  const lastIdx  = nextStart !== null ? nextStart - 1 : pageStart + visibleParagraphs.length - 1
-  const percent  = total > 0 ? Math.round(((pageStart + 1) / total) * 100) : 0
+  const total      = paragraphs[0]?.total ?? project.total ?? 1
+  const lastIdx    = nextStart !== null ? nextStart - 1 : pageStart + visibleParagraphs.length - 1
+  const percent    = total > 0 ? Math.round(((pageStart + 1) / total) * 100) : 0
+  const transPct   = project.total > 0 ? Math.round((project.translated / project.total) * 100) : 0
+  const isDirect   = project.sourceLang === project.targetLang
 
   return (
     <div className="reader-page">
@@ -512,16 +514,18 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         <div className="reader-title">
           {project.title || project.name}
         </div>
-        <div className="reader-view-toggle">
-          <button
-            className={`reader-view-btn ${isSource ? 'active' : ''}`}
-            onClick={() => setIsSource(true)}
-          >{langCode(project.sourceLang)}</button>
-          <button
-            className={`reader-view-btn ${!isSource ? 'active' : ''}`}
-            onClick={() => setIsSource(false)}
-          >{langCode(project.targetLang)}</button>
-        </div>
+        {!isDirect && (
+          <div className="reader-view-toggle">
+            <button
+              className={`reader-view-btn ${isSource ? 'active' : ''}`}
+              onClick={() => setIsSource(true)}
+            >{langCode(project.sourceLang)}</button>
+            <button
+              className={`reader-view-btn ${!isSource ? 'active' : ''}`}
+              onClick={() => setIsSource(false)}
+            >{langCode(project.targetLang)}</button>
+          </div>
+        )}
         <button className="theme-btn" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
@@ -562,23 +566,30 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          height: 2,
-          background: 'var(--border)',
-        }}>
-          <div style={{
-            width: `${percent}%`,
-            height: '100%',
-            background: 'var(--accent)',
-            transition: 'width .4s ease',
-          }} />
+        {/* Progress bars — read (top) + translated (bottom, translated books only) */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {/* Reading progress */}
+          <div style={{ height: 2, background: 'var(--border)' }}>
+            <div style={{
+              width: `${percent}%`, height: '100%',
+              background: '#4caf82', transition: 'width .4s ease',
+            }} />
+          </div>
+          {/* Translation progress */}
+          {!isDirect && (
+            <div style={{ height: 2, background: 'var(--border)' }}>
+              <div style={{
+                width: `${transPct}%`, height: '100%',
+                background: 'var(--accent)', transition: 'width .4s ease',
+              }} />
+            </div>
+          )}
         </div>
 
         {/* Persistent progress — always visible at bottom-right */}
         <div className="reader-progress-label">
-          ¶{pageStart + 1}–{lastIdx + 1} / {total} · {percent}%
+          ¶{pageStart + 1}–{lastIdx + 1} / {total}
+          {isDirect ? ` · ${percent}%` : ` · 📖${percent}% 🔤${transPct}%`}
         </div>
 
         {/* Overlay */}
@@ -597,12 +608,12 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
             </div>
             <div className="overlay-divider" />
             <div className="overlay-actions">
-              {!isSource && (
+              {!isDirect && !isSource && (
                 <button className="btn overlay-btn" onClick={handleFix} disabled={isTranslating}>
                   🔧 Fix
                 </button>
               )}
-              {bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
+              {!isDirect && bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
               <button
                 className={`btn overlay-btn${pageBookmark ? ' active' : ''}`}
                 onClick={openBookmarkModal}
@@ -681,8 +692,8 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-      {/* ── Export reminder ── */}
-      {showExportReminder && (
+      {/* ── Export reminder (only for translated books) ── */}
+      {!isDirect && showExportReminder && (
         <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setShowExportReminder(false)}>
           <div className="modal" style={{ textAlign: 'center', gap: 16 }}>
             <div style={{ fontSize: 40 }}>🎉</div>

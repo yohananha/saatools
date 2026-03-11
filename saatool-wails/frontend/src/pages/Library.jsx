@@ -458,12 +458,13 @@ export default function Library({ onOpenReader }) {
     try {
       const s = JSON.parse(localStorage.getItem('libraryFilters') || '{}')
       return {
-        statuses: new Set(s.statuses || []),
-        authors:  new Set(s.authors  || []),
-        genres:   new Set(s.genres   || []),
-        styles:   new Set(s.styles   || []),
+        readStatuses:  new Set(s.readStatuses  || []),
+        transStatuses: new Set(s.transStatuses || []),
+        authors:       new Set(s.authors       || []),
+        genres:        new Set(s.genres        || []),
+        styles:        new Set(s.styles        || []),
       }
-    } catch { return { statuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() } }
+    } catch { return { readStatuses: new Set(), transStatuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() } }
   })
 
   const load = useCallback(async () => {
@@ -480,21 +481,14 @@ export default function Library({ onOpenReader }) {
 
   useEffect(() => { load() }, [load])
 
-  // Close filter dropdown on outside click
-  useEffect(() => {
-    if (!filterOpen) return
-    const handler = () => setFilterOpen(false)
-    document.addEventListener('click', handler)
-    return () => document.removeEventListener('click', handler)
-  }, [filterOpen])
-
   // Persist filter state
   useEffect(() => {
     localStorage.setItem('libraryFilters', JSON.stringify({
-      statuses: [...filters.statuses],
-      authors:  [...filters.authors],
-      genres:   [...filters.genres],
-      styles:   [...filters.styles],
+      readStatuses:  [...filters.readStatuses],
+      transStatuses: [...filters.transStatuses],
+      authors:       [...filters.authors],
+      genres:        [...filters.genres],
+      styles:        [...filters.styles],
     }))
   }, [filters])
 
@@ -508,7 +502,7 @@ export default function Library({ onOpenReader }) {
   }
 
   function clearFilters() {
-    setFilters({ statuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() })
+    setFilters({ readStatuses: new Set(), transStatuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() })
   }
 
   async function handleOpen(info) {
@@ -553,18 +547,26 @@ export default function Library({ onOpenReader }) {
   }
 
   // ── Filter + sort logic ────────────────────────────────────────────────
-  function bookStatus(p) {
-    const pct = p.total > 0 ? (p.translated / p.total) * 100 : 0
-    if (pct >= 100) return 'completed'
-    if (pct > 0)    return 'in_progress'
-    return 'not_started'
+  function readStatus(p) {
+    const readAt = p.readAt || 0
+    if (!p.total || readAt === 0) return 'not_started'
+    if (readAt >= p.total) return 'completed'
+    return 'in_progress'
+  }
+  function transStatus(p) {
+    if (p.direct) return 'direct'
+    if (!p.total || !p.translated) return 'not_started'
+    if (p.translated >= p.total) return 'completed'
+    return 'in_progress'
   }
 
-  const STATUS_ORDER = { in_progress: 0, not_started: 1, completed: 2 }
-  const STATUS_LABELS = { in_progress: 'In Progress', completed: 'Completed', not_started: 'Not Started' }
+  const READ_ORDER   = { in_progress: 0, not_started: 1, completed: 2 }
+  const TRANS_ORDER  = { in_progress: 0, not_started: 1, completed: 2, direct: 3 }
+  const READ_LABELS  = { in_progress: 'Currently Reading', not_started: 'Not Yet Read', completed: 'Finished Reading' }
+  const TRANS_LABELS = { in_progress: 'Translating', not_started: 'Not Translated', completed: 'Fully Translated', direct: 'Direct Read' }
 
-  const isFilterActive = filters.statuses.size > 0 || filters.authors.size > 0 ||
-                         filters.genres.size > 0 || filters.styles.size > 0
+  const isFilterActive = filters.readStatuses.size > 0 || filters.transStatuses.size > 0 ||
+                         filters.authors.size > 0 || filters.genres.size > 0 || filters.styles.size > 0
 
   const allAuthors = [...new Set(projects.map(p => p.author).filter(Boolean))].sort()
   const allGenres  = [...new Set(
@@ -576,8 +578,8 @@ export default function Library({ onOpenReader }) {
 
   const visibleProjects = projects
     .filter(p => {
-      const status = bookStatus(p)
-      if (filters.statuses.size && !filters.statuses.has(status)) return false
+      if (filters.readStatuses.size  && !filters.readStatuses.has(readStatus(p)))   return false
+      if (filters.transStatuses.size && !filters.transStatuses.has(transStatus(p))) return false
       if (filters.authors.size && p.author && !filters.authors.has(p.author)) return false
       if (filters.genres.size) {
         const bookGenres = p.genre ? p.genre.split(',').map(g => normalizeGenre(g)).filter(Boolean) : []
@@ -589,7 +591,11 @@ export default function Library({ onOpenReader }) {
       }
       return true
     })
-    .sort((a, b) => STATUS_ORDER[bookStatus(a)] - STATUS_ORDER[bookStatus(b)])
+    .sort((a, b) => {
+      const rA = READ_ORDER[readStatus(a)]   ?? 99, rB = READ_ORDER[readStatus(b)]   ?? 99
+      if (rA !== rB) return rA - rB
+      return (TRANS_ORDER[transStatus(a)] ?? 99) - (TRANS_ORDER[transStatus(b)] ?? 99)
+    })
 
   return (
     <div className="library-page">
@@ -601,80 +607,99 @@ export default function Library({ onOpenReader }) {
       </div>
 
       {projects.length > 0 && (
-        <div className="library-filters" style={{ position: 'relative' }}>
+        <div className="library-filters">
           <button
-            className={`filter-toggle-btn${isFilterActive ? ' active' : ''}${filterOpen ? ' open' : ''}`}
-            onClick={e => { e.stopPropagation(); setFilterOpen(o => !o) }}
+            className={`filter-toggle-btn${isFilterActive ? ' active' : ''}`}
+            onClick={() => setFilterOpen(o => !o)}
           >
-            {/* funnel icon */}
             <svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor" aria-hidden="true">
               <path d="M0 0h13v1.8L8 6v5l-3-1.5V6L0 1.8z"/>
             </svg>
             Filters
             {isFilterActive && (
               <span className="filter-badge">
-                {filters.statuses.size + filters.authors.size + filters.genres.size + filters.styles.size}
+                {filters.readStatuses.size + filters.transStatuses.size + filters.authors.size + filters.genres.size + filters.styles.size}
               </span>
             )}
-            <span className="filter-chevron">▾</span>
           </button>
           {isFilterActive && (
-            <button className="filter-clear-btn" onClick={e => { e.stopPropagation(); clearFilters() }}>
-              ✕ Clear
-            </button>
-          )}
-          {filterOpen && (
-            <div className="filter-dropdown" onClick={e => e.stopPropagation()}>
-              <div className="filter-section">
-                <div className="filter-section-title">Reading Status</div>
-                {['in_progress', 'completed', 'not_started'].map(s => (
-                  <label key={s} className="filter-check-row">
-                    <input type="checkbox" checked={filters.statuses.has(s)}
-                      onChange={() => toggleFilter('statuses', s)} />
-                    <span>{STATUS_LABELS[s]}</span>
-                  </label>
-                ))}
-              </div>
-              {allAuthors.length > 0 && (
-                <div className="filter-section">
-                  <div className="filter-section-title">By Author</div>
-                  {allAuthors.map(a => (
-                    <label key={a} className="filter-check-row">
-                      <input type="checkbox" checked={filters.authors.has(a)}
-                        onChange={() => toggleFilter('authors', a)} />
-                      <span>{a}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              {allGenres.length > 0 && (
-                <div className="filter-section">
-                  <div className="filter-section-title">By Genre</div>
-                  {allGenres.map(g => (
-                    <label key={g} className="filter-check-row">
-                      <input type="checkbox" checked={filters.genres.has(g)}
-                        onChange={() => toggleFilter('genres', g)} />
-                      <span>{g}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              {allStyles.length > 0 && (
-                <div className="filter-section">
-                  <div className="filter-section-title">By Writing Style</div>
-                  {allStyles.map(st => (
-                    <label key={st} className="filter-check-row">
-                      <input type="checkbox" checked={filters.styles.has(st)}
-                        onChange={() => toggleFilter('styles', st)} />
-                      <span>{st}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button className="filter-clear-btn" onClick={clearFilters}>✕ Clear</button>
           )}
         </div>
       )}
+
+      {/* ── Filter side drawer ───────────────────────────────────────────── */}
+      {filterOpen && <div className="filter-backdrop" onClick={() => setFilterOpen(false)} />}
+      <div className={`filter-drawer${filterOpen ? ' open' : ''}`}>
+        <div className="filter-drawer-header">
+          <span className="filter-drawer-title">Filters</span>
+          <button className="filter-drawer-close" onClick={() => setFilterOpen(false)}>✕</button>
+        </div>
+        <div className="filter-drawer-body">
+          <div className="filter-section">
+            <div className="filter-section-title">Reading Progress</div>
+            {['in_progress', 'not_started', 'completed'].map(s => (
+              <label key={s} className="filter-check-row">
+                <input type="checkbox" checked={filters.readStatuses.has(s)}
+                  onChange={() => toggleFilter('readStatuses', s)} />
+                <span>{READ_LABELS[s]}</span>
+              </label>
+            ))}
+          </div>
+          <div className="filter-section">
+            <div className="filter-section-title">Translation Progress</div>
+            {['in_progress', 'not_started', 'completed', 'direct'].map(s => (
+              <label key={s} className="filter-check-row">
+                <input type="checkbox" checked={filters.transStatuses.has(s)}
+                  onChange={() => toggleFilter('transStatuses', s)} />
+                <span>{TRANS_LABELS[s]}</span>
+              </label>
+            ))}
+          </div>
+          {allAuthors.length > 0 && (
+            <div className="filter-section">
+              <div className="filter-section-title">By Author</div>
+              {allAuthors.map(a => (
+                <label key={a} className="filter-check-row">
+                  <input type="checkbox" checked={filters.authors.has(a)}
+                    onChange={() => toggleFilter('authors', a)} />
+                  <span>{a}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {allGenres.length > 0 && (
+            <div className="filter-section">
+              <div className="filter-section-title">By Genre</div>
+              {allGenres.map(g => (
+                <label key={g} className="filter-check-row">
+                  <input type="checkbox" checked={filters.genres.has(g)}
+                    onChange={() => toggleFilter('genres', g)} />
+                  <span>{g}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {allStyles.length > 0 && (
+            <div className="filter-section">
+              <div className="filter-section-title">By Writing Style</div>
+              {allStyles.map(st => (
+                <label key={st} className="filter-check-row">
+                  <input type="checkbox" checked={filters.styles.has(st)}
+                    onChange={() => toggleFilter('styles', st)} />
+                  <span>{st}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {isFilterActive && (
+            <div style={{ padding: '16px' }}>
+              <button className="btn danger" style={{ width: '100%', justifyContent: 'center' }}
+                onClick={clearFilters}>✕ Clear all filters</button>
+            </div>
+          )}
+        </div>
+      </div>
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>

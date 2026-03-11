@@ -38,6 +38,7 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
   const [s, setS]       = useState(null)
   const [saving, setSaving] = useState(false)
   const [keepScreenOn, setKeepScreenOnLocal] = useState(() => localStorage.getItem('keepScreenOn') !== 'false')
+  const [showLog, setShowLog] = useState(false)
 
   useEffect(() => {
     GetSettings().then(setS).catch(e => toast(`Could not load settings: ${e}`, 'error'))
@@ -175,16 +176,30 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
           className="btn primary"
           onClick={handleSave}
           disabled={saving}
-          style={{ minWidth: 100 }}
+          style={{ minWidth: 120, justifyContent: 'center', gap: 6 }}
         >
           {saving ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> : null}
           Save
         </button>
       </div>
 
-      <Section title="Logs">
-        <Log inline />
-      </Section>
+      <div className="settings-section">
+        <button
+          className="settings-section-title log-toggle-btn"
+          onClick={() => setShowLog(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                   width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+                   padding: 0, color: 'inherit' }}
+        >
+          <span>Logs</span>
+          <span style={{ fontSize: 11, opacity: 0.6 }}>{showLog ? '▴ Hide' : '▾ Show'}</span>
+        </button>
+        {showLog && (
+          <div className="settings-card" style={{ marginTop: 8 }}>
+            <Log inline />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

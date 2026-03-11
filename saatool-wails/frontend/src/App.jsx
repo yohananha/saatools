@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { GetSettings } from './api'
+import { GetSettings, SaveSettings } from './api'
 import Library from './pages/Library'
 import Reader  from './pages/Reader'
 import Settings from './pages/Settings'
@@ -65,7 +65,14 @@ export default function App() {
   }, [])
 
   const toggleTheme = useCallback(() => {
-    setTheme(t => t === 'dark' ? 'light' : 'dark')
+    setTheme(t => {
+      const next = t === 'dark' ? 'light' : 'dark'
+      // Persist immediately — fire-and-forget
+      GetSettings()
+        .then(s => SaveSettings({ ...s, darkMode: next === 'dark' }))
+        .catch(() => {})
+      return next
+    })
   }, [])
 
   // Reader is fullscreen — no bottom nav

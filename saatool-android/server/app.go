@@ -199,6 +199,20 @@ func (a *App) GetSettings() Settings {
 }
 
 func (a *App) SaveSettings(s Settings) error {
+	// Validate numeric bounds so a malformed request cannot set values that
+	// crash the runtime (e.g. TranslateAhead=0 means no translation fires).
+	if s.TranslateAhead < 1 || s.TranslateAhead > 50 {
+		return fmt.Errorf("translateAhead must be between 1 and 50")
+	}
+	if s.AppSize < 8 || s.AppSize > 48 {
+		return fmt.Errorf("appSize must be between 8 and 48")
+	}
+	if s.TranslationDocSize < 1 || s.TranslationDocSize > 20 {
+		return fmt.Errorf("translationDocSize must be between 1 and 20")
+	}
+	if s.FixModel != "" && s.FixModel != "deepseek-chat" && s.FixModel != "deepseek-reasoner" {
+		return fmt.Errorf("fixModel must be \"deepseek-chat\" or \"deepseek-reasoner\"")
+	}
 	config.Options.DeepSeekAPIKey = s.DeepSeekAPIKey
 	config.Options.TranslateAhead = s.TranslateAhead
 	config.Options.AppSize = s.AppSize
@@ -522,6 +536,11 @@ func (a *App) FetchBookDetails(projectPath string) (BookDetailsInfo, error) {
 	p.Synopsis = bookDetails.Synopsis
 	p.WritingStyle = bookDetails.WritingStyle
 	p.Characters = bookDetails.MainCharacters
+	// Guard nil: always store a non-nil slice so the frontend never gets a
+	// JSON null for the characters field when the AI returns no characters.
+	if p.Characters == nil {
+		p.Characters = []translation.Character{}
+	}
 
 	if _, err := p.Save(); err != nil {
 		log.Printf("could not save project after AI fetch: %v", err)
@@ -660,7 +679,16 @@ func coverPathForProject(projectPath string) (string, bool) {
 	return "", false
 }
 
+// maxCoverBytes caps the size of a cover image we are willing to store.
+// A malicious or corrupt EPUB could embed an enormous image; this prevents
+// the app from exhausting storage or memory.
+const maxCoverBytes = 10 << 20 // 10 MB
+
 func saveCoverForProject(projectPath string, data []byte, mediaType string) {
+	if len(data) > maxCoverBytes {
+		log.Printf("cover image too large (%d bytes > %d limit), skipping", len(data), maxCoverBytes)
+		return
+	}
 	ext := ".cover.jpg"
 	if strings.Contains(mediaType, "png") {
 		ext = ".cover.png"
@@ -736,7 +764,9 @@ func extractCoverFromEPUB(epubPath string) ([]byte, string) {
 			return nil, err
 		}
 		defer rc.Close()
-		return io.ReadAll(rc)
+		// Limit reads to maxCoverBytes to prevent memory exhaustion from a
+		// malicious/corrupt EPUB that declares a huge cover image.
+		return io.ReadAll(io.LimitReader(rc, maxCoverBytes))
 	}
 
 	cf := findZip("META-INF/container.xml")

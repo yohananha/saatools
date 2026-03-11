@@ -163,10 +163,13 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Load last saved position on mount ───────────────────────────────────
   useEffect(() => {
+    let cancelled = false
     GetLastPosition(project.path).then(pos => {
+      if (cancelled) return
       setPageStart(pos.index)
       setIsSource(pos.sourceView)
     }).catch(() => {})
+    return () => { cancelled = true }
   }, [project.path])
 
   // ── Fetch batch whenever pageStart or isSource changes ──────────────────
@@ -187,7 +190,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
       })
       .catch(e => toast(`Could not load paragraphs: ${e}`, 'error'))
     return () => { cancelled = true }
-  }, [project.path, pageStart, isSource])
+  }, [project.path, pageStart, isSource, toast])
 
   // ── Chapter-aware visible slice ───────────────────────────────────────────
   // Find the first chapter-start that is NOT at position 0 on this page.

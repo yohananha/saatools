@@ -689,8 +689,8 @@ html, body, #root {
 }
 
 .overlay-actions {
-  display: flex; flex-wrap: nowrap; gap: 5px; align-items: center;
-  flex: 1; justify-content: flex-end; overflow: hidden;
+  display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+  flex: 1; justify-content: flex-end;
 }
 .overlay-actions .btn, .overlay-btn {
   padding: 5px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0;

@@ -34,6 +34,8 @@ type ProjectInfo struct {
 	TargetLang   string `json:"targetLang"`
 	Total        int    `json:"total"`
 	Translated   int    `json:"translated"`
+	ReadAt       int    `json:"readAt"`   // last read paragraph index
+	Direct       bool   `json:"direct"`   // true = imported for direct reading (no translation)
 }
 
 // ParagraphInfo holds one paragraph's content and metadata.
@@ -131,6 +133,8 @@ func projectToInfo(projectPath string, p *translation.Project) ProjectInfo {
 		TargetLang:   p.Target.Language,
 		Total:        len(p.Source.Paragraphs),
 		Translated:   translated,
+		ReadAt:       p.LastParagraphIndex,
+		Direct:       p.Source.Language == p.Target.Language,
 	}
 }
 

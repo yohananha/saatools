@@ -91,13 +91,18 @@ type App struct {
 	mu          sync.Mutex
 	projects    map[string]*translation.Project
 	translators map[string]*ai.Translator
+	// translationSem is a shared semaphore that caps concurrent API calls across
+	// ALL TranslateParagraphs invocations, preventing goroutine accumulation when
+	// the user triggers rapid translate-ahead requests.
+	translationSem chan struct{}
 }
 
 // NewApp creates a new App instance.
 func NewApp() *App {
 	return &App{
-		projects:    make(map[string]*translation.Project),
-		translators: make(map[string]*ai.Translator),
+		projects:       make(map[string]*translation.Project),
+		translators:    make(map[string]*ai.Translator),
+		translationSem: make(chan struct{}, maxConcurrentTranslations),
 	}
 }
 
@@ -136,8 +141,29 @@ func dirStr(d translation.Direction) string {
 	return "ltr"
 }
 
+// validateProjectPath returns an error if projectPath would escape the projects
+// directory. Prevents path-traversal attacks (../../etc/passwd, etc.).
+func validateProjectPath(projectPath string) error {
+	if projectPath == "" {
+		return fmt.Errorf("project path is empty")
+	}
+	projDir := filepath.Clean(config.ProjectsDir())
+	clean := filepath.Clean(projectPath)
+	rel, err := filepath.Rel(projDir, clean)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return fmt.Errorf("invalid project path: must be within projects directory")
+	}
+	return nil
+}
+
 // getOrLoad returns a cached project or loads it from disk.
 func (a *App) getOrLoad(projectPath string) (*translation.Project, error) {
+	// Defense-in-depth: validate path even though callers come from the Wails
+	// RPC bridge (file-dialog paths), guarding against a compromised frontend.
+	if err := validateProjectPath(projectPath); err != nil {
+		return nil, fmt.Errorf("invalid project path: %w", err)
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -470,12 +496,18 @@ func (a *App) TranslateParagraph(projectPath string, index int) error {
 	return nil
 }
 
-// maxConcurrentTranslations limits how many paragraphs are translated in parallel
+// maxConcurrentTranslations limits how many batch goroutines run in parallel
 // to avoid triggering DeepSeek rate-limits when TranslateAhead > 2.
 const maxConcurrentTranslations = 2
 
-// TranslateParagraphs triggers translation of several paragraphs starting at fromIndex.
-// At most maxConcurrentTranslations goroutines run at the same time (Change 5).
+// translationBatchSize is the number of paragraphs sent in a single API call.
+const translationBatchSize = 5
+
+// TranslateParagraphs triggers batched translation of paragraphs starting at
+// fromIndex. Paragraphs are grouped into batches of translationBatchSize and
+// dispatched via the shared App-level semaphore so that concurrent calls to
+// this function (e.g. rapid translate-ahead taps) never exceed
+// maxConcurrentTranslations simultaneous API calls in total.
 func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 	a.mu.Lock()
 	t, ok := a.translators[projectPath]
@@ -497,18 +529,26 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 		end = len(p.Source.Paragraphs)
 	}
 
-	// Buffered channel used as a counting semaphore: at most maxConcurrentTranslations
-	// goroutines may call the DeepSeek API simultaneously.
-	sem := make(chan struct{}, maxConcurrentTranslations)
-	for i := fromIndex; i < end; i++ {
-		idx := i
-		sem <- struct{}{} // acquire slot; blocks when maxConcurrentTranslations are busy
-		go func() {
-			defer func() { <-sem }() // release slot when done
-			if err := t.Translate(a.ctx, idx); err != nil {
-				log.Printf("translation error at %d: %v", idx, err)
+	for i := fromIndex; i < end; i += translationBatchSize {
+		batchEnd := i + translationBatchSize
+		if batchEnd > end {
+			batchEnd = end
+		}
+		indices := make([]int, batchEnd-i)
+		for j := range indices {
+			indices[j] = i + j
+		}
+		// Block until a slot is free in the shared semaphore. Because the
+		// semaphore lives on the App (not per-call), concurrent invocations
+		// of TranslateParagraphs all compete for the same pool of slots,
+		// capping total concurrent API calls regardless of call frequency.
+		a.translationSem <- struct{}{}
+		go func(batch []int) {
+			defer func() { <-a.translationSem }()
+			if err := t.TranslateAndProofReadBatch(a.ctx, batch); err != nil {
+				log.Printf("batch translation error (%v): %v", batch, err)
 			}
-		}()
+		}(indices)
 	}
 	return nil
 }
@@ -651,6 +691,14 @@ func (a *App) GetGlossary(projectPath string) (map[string]string, error) {
 // SetGlossaryEntry adds or updates a glossary entry, saves the project, and
 // rebuilds the translator so the new term is used in subsequent translations.
 func (a *App) SetGlossaryEntry(projectPath, sourceTerm, targetTerm string) error {
+	// Match the handler-layer limit (300 chars = sanitizeGlossaryText cap).
+	const maxTermLen = 300
+	if sourceTerm == "" {
+		return fmt.Errorf("term cannot be empty")
+	}
+	if len(sourceTerm) > maxTermLen || len(targetTerm) > maxTermLen {
+		return fmt.Errorf("term exceeds maximum length of %d characters", maxTermLen)
+	}
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {
 		return err
@@ -702,6 +750,12 @@ func (a *App) AddBookmark(projectPath string, index int, note string) error {
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {
 		return err
+	}
+	// Validate index is within the actual paragraph range so out-of-range
+	// bookmarks can never be stored (they would cause silent JS undefined
+	// access when rendering the bookmark list).
+	if index < 0 || index >= len(p.Source.Paragraphs) {
+		return fmt.Errorf("bookmark index %d out of range (0–%d)", index, len(p.Source.Paragraphs)-1)
 	}
 	p.AddBookmark(index, note)
 	if _, err := p.Save(); err != nil {
@@ -755,7 +809,8 @@ func saveCoverForProject(projectPath string, data []byte, mediaType string) {
 	}
 	stem := strings.TrimSuffix(projectPath, config.ProjectFileExt)
 	dest := stem + ext
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	// 0600 = owner read/write only; consistent with options.json permissions.
+	if err := os.WriteFile(dest, data, 0600); err != nil {
 		log.Printf("could not save cover for %s: %v", projectPath, err)
 	}
 }

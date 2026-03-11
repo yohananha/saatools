@@ -641,6 +641,12 @@ func (a *App) AddBookmark(projectPath string, index int, note string) error {
 	if err != nil {
 		return err
 	}
+	// Validate index is within the actual paragraph range so out-of-range
+	// bookmarks can never be stored (they would cause silent JS undefined
+	// access when rendering the bookmark list).
+	if index < 0 || index >= len(p.Source.Paragraphs) {
+		return fmt.Errorf("bookmark index %d out of range (0–%d)", index, len(p.Source.Paragraphs)-1)
+	}
 	p.AddBookmark(index, note)
 	if _, err := p.Save(); err != nil {
 		return fmt.Errorf("could not save project: %w", err)
@@ -695,7 +701,8 @@ func saveCoverForProject(projectPath string, data []byte, mediaType string) {
 	}
 	stem := strings.TrimSuffix(projectPath, config.ProjectFileExt)
 	dest := stem + ext
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	// 0600 = owner read/write only; consistent with options.json permissions.
+	if err := os.WriteFile(dest, data, 0600); err != nil {
 		log.Printf("could not save cover for %s: %v", projectPath, err)
 	}
 }

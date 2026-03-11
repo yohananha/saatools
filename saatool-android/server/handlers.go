@@ -322,9 +322,19 @@ func (s *Server) handleParagraphsBatch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fmt.Errorf("invalid 'from': %w", err), http.StatusBadRequest)
 		return
 	}
+	if from < 0 {
+		writeErr(w, fmt.Errorf("'from' must be >= 0"), http.StatusBadRequest)
+		return
+	}
 	count, err := queryInt(r, "count")
 	if err != nil {
 		writeErr(w, fmt.Errorf("invalid 'count': %w", err), http.StatusBadRequest)
+		return
+	}
+	// Cap batch size to prevent DoS via count=999999999 causing memory exhaustion.
+	const maxBatchCount = 500
+	if count < 1 || count > maxBatchCount {
+		writeErr(w, fmt.Errorf("'count' must be between 1 and %d", maxBatchCount), http.StatusBadRequest)
 		return
 	}
 	isSource := queryBool(r, "source")
@@ -535,7 +545,8 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 		}
 		// Prevent empty terms and enforce a reasonable length limit to reduce
 		// the surface area for AI prompt injection via crafted glossary entries.
-		const maxTermLen = 500
+		// Matches sanitizeGlossaryText's 300-char cap in project.go.
+		const maxTermLen = 300
 		if body.Term == "" {
 			writeErr(w, fmt.Errorf("term cannot be empty"), http.StatusBadRequest)
 			return
@@ -612,6 +623,12 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Index < 0 {
 			writeErr(w, fmt.Errorf("bookmark index cannot be negative"), http.StatusBadRequest)
+			return
+		}
+		// Note length cap: guard against project file bloat.
+		const maxNoteLen = 1000
+		if len(body.Note) > maxNoteLen {
+			writeErr(w, fmt.Errorf("note exceeds maximum length of %d characters", maxNoteLen), http.StatusBadRequest)
 			return
 		}
 		if err := s.app.AddBookmark(body.Path, body.Index, body.Note); err != nil {

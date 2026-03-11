@@ -158,6 +158,7 @@ html, body, #root {
 .btn.primary:hover { filter: brightness(1.12); }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn.danger:hover { filter: brightness(1.1); }
+.btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
 .btn.icon-only { padding: 8px; border-radius: 50%; font-size: 16px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 
@@ -169,6 +170,116 @@ html, body, #root {
 
 /* ── Library ─────────────────────────────────────────────────────────── */
 .library-page { display: flex; flex-direction: column; height: 100%; }
+
+.library-filters {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px 0;
+  flex-wrap: wrap;
+}
+/* ── Filter toggle button ─────────────────────────────────────────────── */
+.filter-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  user-select: none;
+}
+.filter-toggle-btn:hover { border-color: var(--accent); color: var(--fg); }
+.filter-toggle-btn.open  { border-color: var(--accent); color: var(--fg); }
+.filter-toggle-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+.filter-badge {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.filter-chevron {
+  font-size: 11px;
+  transition: transform 200ms ease;
+  display: inline-block;
+}
+.filter-toggle-btn.open .filter-chevron { transform: rotate(180deg); }
+
+.filter-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.filter-clear-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+/* kept for any legacy usage */
+.filter-btn {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--btn);
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.filter-btn:hover  { background: var(--btn-hover); color: var(--fg); }
+.filter-btn.active { background: var(--accent); color: #1e1e2e; border-color: var(--accent); font-weight: 600; }
+
+.filter-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.filter-section { padding: 8px 12px 4px; }
+.filter-section + .filter-section { border-top: 1px solid var(--border); margin-top: 4px; }
+.filter-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 6px;
+}
+.filter-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.filter-check-row:hover { color: var(--fg); }
+.filter-check-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .book-grid {
   display: grid;
@@ -364,6 +475,20 @@ html, body, #root {
   background: var(--bg);
 }
 
+.reader-back-btn {
+  background: none;
+  border: none; cursor: pointer;
+  padding: 5px 8px;
+  font-size: 18px; font-weight: 700;
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--transition);
+}
+.reader-back-btn:hover { background: rgba(200,50,50,.15); }
+
 .reader-topbar {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px;
@@ -404,6 +529,7 @@ html, body, #root {
   position: relative;
   overflow: hidden;
   display: flex;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .reader-text-container {
@@ -426,6 +552,7 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  animation: fade-in .08s ease;
 }
 
 .reader-text {
@@ -484,9 +611,38 @@ html, body, #root {
   z-index: 20;
 }
 
-.overlay-font-btns { display: flex; gap: 6px; }
+/* Single Aa button that toggles font panel */
+.font-aa-btn {
+  width: 40px; height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--btn);
+  border: none; cursor: pointer;
+  font-family: var(--font-ui); font-size: 15px; font-weight: 700;
+  color: var(--fg);
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+.font-aa-btn:hover, .font-aa-btn.active { background: var(--btn-hover); color: var(--accent); }
+
+/* Panel that pops above the Aa button */
+.font-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-card);
+  animation: fade-in .1s ease;
+  z-index: 30;
+}
 .font-btn {
-  width: 36px; height: 36px;
+  width: 36px; height: 32px;
   border-radius: var(--radius-sm);
   background: var(--btn);
   border: none; cursor: pointer;
@@ -494,9 +650,26 @@ html, body, #root {
   color: var(--fg);
   display: flex; align-items: center; justify-content: center;
   transition: background var(--transition);
+  -webkit-tap-highlight-color: transparent;
 }
 .font-btn:hover { background: var(--btn-hover); }
-.font-btn.minus { font-size: 18px; }
+.font-size-label {
+  min-width: 28px; text-align: center;
+  font-size: 13px; color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Persistent progress label at bottom-right of tap area */
+.reader-progress-label {
+  position: absolute;
+  bottom: 8px; right: 12px;
+  font-size: 11px; font-weight: 500;
+  color: var(--fg-subtle);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .3px;
+  white-space: nowrap;
+}
 
 .overlay-divider {
   width: 1px; height: 28px;
@@ -509,7 +682,19 @@ html, body, #root {
   font-variant-numeric: tabular-nums;
 }
 
-.overlay-actions { display: flex; gap: 6px; }
+/* Font controls column inside overlay */
+.overlay-font-ctrl {
+  display: flex; flex-direction: column; gap: 3px; align-items: center;
+  flex-shrink: 0;
+}
+
+.overlay-actions {
+  display: flex; flex-wrap: nowrap; gap: 5px; align-items: center;
+  flex: 1; justify-content: flex-end; overflow: hidden;
+}
+.overlay-actions .btn, .overlay-btn {
+  padding: 5px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0;
+}
 
 /* ── Settings ────────────────────────────────────────────────────────── */
 .settings-page { padding: 0 0 24px; }
@@ -668,3 +853,25 @@ html, body, #root {
 .glossary-src  { flex: 1; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
 .glossary-arrow { color: var(--fg-muted); flex-shrink: 0; }
 .glossary-tgt  { flex: 1; color: var(--fg-muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Bookmark list rows */
+.bookmark-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.bookmark-list-row:last-of-type { border-bottom: none; }
+.bookmark-list-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  min-width: 0;
+}
+.bookmark-list-left:hover .bookmark-para-num { color: var(--accent); }
+.bookmark-para-num { font-size: 12px; color: var(--fg-subtle); font-weight: 600; }
+.bookmark-note    { font-size: 13px; color: var(--fg); }
+.bookmark-preview { font-size: 13px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

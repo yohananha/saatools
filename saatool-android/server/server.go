@@ -158,6 +158,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Glossary
 	mux.HandleFunc("/api/glossary", s.handleGlossary)
 
+	// Bookmarks
+	mux.HandleFunc("/api/bookmarks", s.handleBookmarks)
+
 	// Log
 	mux.HandleFunc("/api/log", s.handleLog)
 

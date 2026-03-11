@@ -3,9 +3,12 @@ import {
   GetParagraphsBatch, TranslateParagraphs,
   FixTranslation, SavePosition, GetLastPosition, SaveProject,
   GetGlossary, SetGlossaryEntry, DeleteGlossaryEntry,
-  onTranslationComplete,
+  GetBookmarks, AddBookmark, DeleteBookmark,
+  onTranslationComplete, ExportProject,
 } from '../api'
 import { toast } from '../App'
+
+const langCode = lang => (lang || '?').slice(0, 2).toUpperCase()
 
 const MIN_FONT      = 12
 const MAX_FONT      = 36
@@ -49,30 +52,71 @@ function GlossaryModal({ term: initTerm, initial, termEditable, onSave, onDelete
   )
 }
 
-// ── GlossaryListModal ─────────────────────────────────────────────────────────
-// Shows all glossary entries with edit / delete per entry, plus an Add button.
-function GlossaryListModal({ glossary, onEdit, onAdd, onClose }) {
-  const entries = Object.entries(glossary)
+
+// ── BookmarkAddModal ───────────────────────────────────────────────────────────
+function BookmarkAddModal({ index, existing, onSave, onDelete, onClose }) {
+  const [note, setNote] = useState(existing?.note || '')
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 340 }} onClick={e => e.stopPropagation()}>
+        <h2>🔖 {existing ? 'Edit Bookmark' : 'Add Bookmark'}</h2>
+        <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginBottom: 12 }}>
+          Paragraph {index + 1}
+        </div>
+        <div className="form-row">
+          <label>Note (optional)</label>
+          <textarea
+            className="form-input form-textarea"
+            rows={3}
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Add a note…"
+            autoFocus
+          />
+        </div>
+        <div className="modal-actions">
+          {existing && (
+            <button className="btn danger" onClick={() => onDelete(index)}>Remove</button>
+          )}
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={() => onSave(index, note)}>
+            {existing ? 'Update' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── BookmarkListModal ──────────────────────────────────────────────────────────
+function BookmarkListModal({ bookmarks, paragraphTexts, onNavigate, onEdit, onDelete, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal book-info-modal" onClick={e => e.stopPropagation()}>
-        <h2>📖 Glossary ({entries.length})</h2>
-        {entries.length === 0 && (
+        <h2>🔖 Bookmarks ({bookmarks.length})</h2>
+        {bookmarks.length === 0 && (
           <p style={{ color: 'var(--fg-muted)', fontSize: 14, margin: '12px 0' }}>
-            No entries yet. Select text while reading to add terms.
+            No bookmarks yet. Long-press or use the overlay to add one.
           </p>
         )}
-        {entries.map(([src, tgt]) => (
-          <div key={src} className="glossary-list-row">
-            <span className="glossary-src">{src}</span>
-            <span className="glossary-arrow">→</span>
-            <span className="glossary-tgt">{tgt}</span>
-            <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }}
-              onClick={() => onEdit(src, tgt)}>Edit</button>
+        {[...bookmarks].sort((a, b) => a.index - b.index).map(b => (
+          <div key={b.index} className="bookmark-list-row">
+            <div className="bookmark-list-left" onClick={() => onNavigate(b.index)}>
+              <span className="bookmark-para-num">¶{b.index + 1}</span>
+              {b.note && <span className="bookmark-note">{b.note}</span>}
+              {!b.note && paragraphTexts[b.index] && (
+                <span className="bookmark-preview">{paragraphTexts[b.index].slice(0, 60)}…</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => onEdit(b)}>✏</button>
+              <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => onDelete(b.index)}>✕</button>
+            </div>
           </div>
         ))}
         <div className="modal-actions">
-          <button className="btn" onClick={onAdd}>+ Add Entry</button>
           <button className="btn primary" onClick={onClose}>Done</button>
         </div>
       </div>
@@ -86,19 +130,31 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const [paragraphs,     setParagraphs]     = useState([])      // fetched batch
   const [nextStart,      setNextStart]      = useState(null)    // first index of next page (null = last page)
   const [history,        setHistory]        = useState([])      // back-stack of pageStart values
+  const [fadeKey,        setFadeKey]        = useState(0)       // incremented on each page load to replay fade-in
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [translatingSet, setTranslatingSet] = useState(new Set()) // para indices being translated
   const [isSource,       setIsSource]       = useState(true)
   const [fontSize,       setFontSize]       = useState(18)
   const [showOverlay,    setShowOverlay]    = useState(false)
+  const [showFontPanel,  setShowFontPanel]  = useState(false)
   const [fittingCount,   setFittingCount]   = useState(BATCH)    // how many paras fully fit on page
+  const [keepScreenOn,   setKeepScreenOn]   = useState(() => localStorage.getItem('keepScreenOn') !== 'false')
+  const [showExportReminder, setShowExportReminder] = useState(false)
+  const [bookDone,       setBookDone]       = useState(
+    () => (project.total ?? 0) > 0 && (project.translated ?? 0) >= (project.total ?? 0)
+  )
+  const translatedInSession = useRef(0)
 
   // ── Glossary state ────────────────────────────────────────────────────────
   const [glossary,        setGlossary]        = useState({})
   const [selectionPopup,  setSelectionPopup]  = useState(null) // {term, x, y} | null
   const [glossaryModal,   setGlossaryModal]   = useState(null) // {term, initial, termEditable} | null
-  const [showGlossaryList, setShowGlossaryList] = useState(false)
+
+  // ── Bookmark state ────────────────────────────────────────────────────────
+  const [bookmarks,        setBookmarks]        = useState([])
+  const [bookmarkModal,    setBookmarkModal]    = useState(null) // {index, existing} | null
+  const [showBookmarkList, setShowBookmarkList] = useState(false)
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const overlayTimer = useRef(null)
@@ -121,6 +177,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         if (cancelled) return
         const items = batch || []
         setParagraphs(items)
+        setFadeKey(k => k + 1)
         // Mark empty target paragraphs as pending translation
         if (!isSource) {
           setTranslatingSet(new Set(items.filter(p => !p.text).map(p => p.index)))
@@ -187,9 +244,21 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         p.index === ev.index ? { ...p, text: ev.text } : p
       ))
       setTranslatingSet(s => { const n = new Set(s); n.delete(ev.index); return n })
+      // Check if the entire book is now fully translated
+      translatedInSession.current += 1
+      const bookTotal = project.total ?? 0
+      const alreadyTranslated = project.translated ?? 0
+      const reminderKey = `exportReminded_${project.path}`
+      if (bookTotal > 0 && alreadyTranslated + translatedInSession.current >= bookTotal) {
+        setBookDone(true)
+        if (!localStorage.getItem(reminderKey)) {
+          localStorage.setItem(reminderKey, 'true')
+          setShowExportReminder(true)
+        }
+      }
     }
     return onTranslationComplete(onTranslated)
-  }, [project.path])
+  }, [project.path, project.total, project.translated])
 
   // ── Trigger translation when viewing target mode ─────────────────────────
   useEffect(() => {
@@ -208,6 +277,17 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     GetGlossary(project.path).then(g => setGlossary(g || {})).catch(() => {})
   }, [project.path])
 
+  // ── Load bookmarks on project open ───────────────────────────────────────
+  useEffect(() => {
+    GetBookmarks(project.path).then(b => setBookmarks(b || [])).catch(() => {})
+  }, [project.path])
+
+  // ── Sync keep-screen-on with Android bridge ───────────────────────────────
+  useEffect(() => {
+    window.AndroidBridge?.setKeepScreenOn(keepScreenOn)
+    localStorage.setItem('keepScreenOn', String(keepScreenOn))
+  }, [keepScreenOn])
+
   // ── Overlay auto-hide ────────────────────────────────────────────────────
   function showOverlayTemporarily() {
     clearTimeout(overlayTimer.current)
@@ -218,6 +298,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     if (showOverlay) {
       clearTimeout(overlayTimer.current)
       setShowOverlay(false)
+      setShowFontPanel(false)
     } else {
       showOverlayTemporarily()
     }
@@ -232,12 +313,19 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     if (delta > 0) {
       if (nextStart === null) return   // already on last page
       setHistory(h => [...h, pageStart])
+      setParagraphs([])
       setPageStart(nextStart)
     } else {
-      if (history.length === 0) return
-      const prev = history[history.length - 1]
-      setHistory(h => h.slice(0, -1))
-      setPageStart(prev)
+      if (history.length > 0) {
+        const prev = history[history.length - 1]
+        setHistory(h => h.slice(0, -1))
+        setParagraphs([])
+        setPageStart(prev)
+      } else if (pageStart > 0) {
+        // No history — jump back by one page worth of paragraphs
+        setParagraphs([])
+        setPageStart(Math.max(0, pageStart - fittingCount))
+      }
     }
   }
 
@@ -326,6 +414,55 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     } catch (e) { toast(`Glossary delete failed: ${e}`, 'error') }
   }
 
+  // ── Bookmarks ─────────────────────────────────────────────────────────────
+
+  const pageBookmarkIndex = paragraphs[0]?.index ?? pageStart
+  const pageBookmark = bookmarks.find(b => paragraphs.some(p => p.index === b.index))
+
+  async function handleAddBookmark(index, note) {
+    try {
+      await AddBookmark(project.path, index, note)
+      setBookmarks(prev => {
+        const filtered = prev.filter(b => b.index !== index)
+        return [...filtered, { index, note }].sort((a, b) => a.index - b.index)
+      })
+      setBookmarkModal(null)
+      toast('Bookmark saved', 'success')
+    } catch (e) {
+      toast(`Bookmark failed: ${e}`, 'error')
+    }
+  }
+
+  async function handleDeleteBookmark(index) {
+    try {
+      await DeleteBookmark(project.path, index)
+      setBookmarks(prev => prev.filter(b => b.index !== index))
+      setBookmarkModal(null)
+      setShowBookmarkList(false)
+      toast('Bookmark removed', 'success')
+    } catch (e) {
+      toast(`Remove failed: ${e}`, 'error')
+    }
+  }
+
+  function openBookmarkModal() {
+    const index = paragraphs[0]?.index ?? pageStart
+    const existing = bookmarks.find(b => b.index === index)
+    setBookmarkModal({ index, existing: existing || null })
+    setShowOverlay(false)
+  }
+
+  function navigateToBookmark(index) {
+    setShowBookmarkList(false)
+    if (index === pageStart) return   // already on this page
+    setHistory(h => [...h, pageStart])
+    setParagraphs([])
+    setPageStart(index)
+  }
+
+  // Paragraph text lookup for bookmark list preview
+  const paragraphTexts = Object.fromEntries(paragraphs.map(p => [p.index, p.text]))
+
   // ── Progress ──────────────────────────────────────────────────────────────
   const total    = paragraphs[0]?.total ?? project.total ?? 1
   const lastIdx  = nextStart !== null ? nextStart - 1 : pageStart + visibleParagraphs.length - 1
@@ -336,9 +473,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
       {/* ── Top bar ── */}
       <div className="reader-topbar">
-        <button className="btn" style={{ padding: '6px 12px', fontSize: 13 }} onClick={onBack}>
-          ← Library
-        </button>
+        <button className="reader-back-btn" onClick={onBack}>✕</button>
         <div className="reader-title">
           {project.title || project.name}
         </div>
@@ -346,11 +481,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           <button
             className={`reader-view-btn ${isSource ? 'active' : ''}`}
             onClick={() => setIsSource(true)}
-          >Source</button>
+          >{langCode(project.sourceLang)}</button>
           <button
             className={`reader-view-btn ${!isSource ? 'active' : ''}`}
             onClick={() => setIsSource(false)}
-          >Trans.</button>
+          >{langCode(project.targetLang)}</button>
         </div>
         <button className="theme-btn" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀️' : '🌙'}
@@ -371,7 +506,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           className={`reader-text-container${isRtl ? ' rtl' : ''}`}
           onMouseUp={handleTextSelection}
         >
-          <div className="reader-text-clip" ref={clipRef}>
+          <div className="reader-text-clip" key={fadeKey} ref={clipRef}>
             {/* Subtle chapter separator when this page opens a new chapter
                 (but not at the very start of the book, index 0) */}
             {paragraphs[0]?.chapterStart && paragraphs[0]?.index > 0 && (
@@ -406,29 +541,46 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           }} />
         </div>
 
+        {/* Persistent progress — always visible at bottom-right */}
+        <div className="reader-progress-label">
+          ¶{pageStart + 1}–{lastIdx + 1} / {total} · {percent}%
+        </div>
+
         {/* Overlay */}
         {showOverlay && (
           <div className="reader-overlay" onClick={e => e.stopPropagation()}>
-            <div className="overlay-font-btns">
-              <button className="font-btn minus" onClick={() => adjustFont(-2)}>A−</button>
-              <button className="font-btn"       onClick={() => adjustFont(+2)}>A+</button>
+            {/* Font controls: Aa taps open stacked A−/A+ in place */}
+            <div className="overlay-font-ctrl">
+              {showFontPanel ? (
+                <>
+                  <button className="font-btn" onClick={() => adjustFont(-2)}>A−</button>
+                  <button className="font-btn" onClick={() => adjustFont(+2)}>A+</button>
+                </>
+              ) : (
+                <button className="font-aa-btn" onClick={() => setShowFontPanel(true)}>Aa</button>
+              )}
             </div>
             <div className="overlay-divider" />
             <div className="overlay-actions">
               {!isSource && (
-                <button className="btn" onClick={handleFix} disabled={isTranslating}>
+                <button className="btn overlay-btn" onClick={handleFix} disabled={isTranslating}>
                   🔧 Fix
                 </button>
               )}
-              <button className="btn" onClick={handleSave}>💾 Save</button>
-              <button className="btn" onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
-                title="Manage glossary">
-                📖{Object.keys(glossary).length > 0 ? ` ${Object.keys(glossary).length}` : ''}
+              {bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
+              <button
+                className={`btn overlay-btn${pageBookmark ? ' active' : ''}`}
+                onClick={openBookmarkModal}
+                title={pageBookmark ? 'Edit bookmark' : 'Add bookmark'}
+              >
+                🔖{pageBookmark ? ' ✓' : ''}
               </button>
-            </div>
-            <div className="overlay-divider" />
-            <div className="overlay-progress">
-              {pageStart + 1}–{lastIdx + 1} / {total} ({percent}%)
+              {bookmarks.length > 0 && (
+                <button className="btn overlay-btn" onClick={() => { setShowOverlay(false); setShowBookmarkList(true) }}
+                  title="All bookmarks">
+                  📑 {bookmarks.length}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -456,14 +608,48 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-      {/* ── Glossary list modal ── */}
-      {showGlossaryList && (
-        <GlossaryListModal
-          glossary={glossary}
-          onEdit={(src, tgt) => { setShowGlossaryList(false); setGlossaryModal({ term: src, initial: tgt, termEditable: false }) }}
-          onAdd={() => { setShowGlossaryList(false); setGlossaryModal({ term: '', initial: '', termEditable: true }) }}
-          onClose={() => setShowGlossaryList(false)}
+
+{/* ── Bookmark add/edit modal ── */}
+      {bookmarkModal && (
+        <BookmarkAddModal
+          index={bookmarkModal.index}
+          existing={bookmarkModal.existing}
+          onSave={handleAddBookmark}
+          onDelete={handleDeleteBookmark}
+          onClose={() => setBookmarkModal(null)}
         />
+      )}
+
+      {/* ── Bookmark list modal ── */}
+      {showBookmarkList && (
+        <BookmarkListModal
+          bookmarks={bookmarks}
+          paragraphTexts={paragraphTexts}
+          onNavigate={navigateToBookmark}
+          onEdit={(b) => { setShowBookmarkList(false); setBookmarkModal({ index: b.index, existing: b }) }}
+          onDelete={handleDeleteBookmark}
+          onClose={() => setShowBookmarkList(false)}
+        />
+      )}
+
+      {/* ── Export reminder ── */}
+      {showExportReminder && (
+        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setShowExportReminder(false)}>
+          <div className="modal" style={{ textAlign: 'center', gap: 16 }}>
+            <div style={{ fontSize: 40 }}>🎉</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>Translation complete!</div>
+            <div style={{ fontSize: 14, color: 'var(--fg-subtle)' }}>
+              The entire book has been translated. Export your project to save a backup.
+            </div>
+            <div className="modal-actions" style={{ justifyContent: 'center' }}>
+              <button className="btn" onClick={() => setShowExportReminder(false)}>Later</button>
+              <button className="btn primary" onClick={() => {
+                setShowExportReminder(false)
+                ExportProject(project.path, null).catch(() => {})
+              }}>Export now</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

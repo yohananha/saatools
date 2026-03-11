@@ -25,14 +25,16 @@ import (
 
 // ProjectInfo is the lightweight view of a project sent to the frontend.
 type ProjectInfo struct {
-	Path       string `json:"path"`
-	Name       string `json:"name"`
-	Title      string `json:"title"`
-	Author     string `json:"author"`
-	SourceLang string `json:"sourceLang"`
-	TargetLang string `json:"targetLang"`
-	Total      int    `json:"total"`
-	Translated int    `json:"translated"`
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	Title        string `json:"title"`
+	Author       string `json:"author"`
+	Genre        string `json:"genre"`
+	WritingStyle string `json:"writingStyle"`
+	SourceLang   string `json:"sourceLang"`
+	TargetLang   string `json:"targetLang"`
+	Total        int    `json:"total"`
+	Translated   int    `json:"translated"`
 }
 
 // ParagraphInfo holds one paragraph's content and metadata.
@@ -61,6 +63,7 @@ type Settings struct {
 	SourceLanguage     string `json:"sourceLanguage"`
 	TargetLanguage     string `json:"targetLanguage"`
 	DarkMode           bool   `json:"darkMode"`
+	FixModel           string `json:"fixModel"`
 }
 
 // BookDetailsInfo carries per-book metadata to and from the frontend.
@@ -113,12 +116,14 @@ func projectToInfo(path string, p *translation.Project) *ProjectInfo {
 		}
 	}
 	return &ProjectInfo{
-		Path:       path,
-		Name:       p.Name,
-		Title:      p.Title,
-		Author:     p.Author,
-		SourceLang: p.Source.Language,
-		TargetLang: p.Target.Language,
+		Path:         path,
+		Name:         p.Name,
+		Title:        p.Title,
+		Author:       p.Author,
+		Genre:        p.Genre,
+		WritingStyle: p.WritingStyle,
+		SourceLang:   p.Source.Language,
+		TargetLang:   p.Target.Language,
 		Total:      len(p.Source.Paragraphs),
 		Translated: translated,
 	}
@@ -672,6 +677,47 @@ func (a *App) DeleteGlossaryEntry(projectPath, sourceTerm string) error {
 	return nil
 }
 
+// ─── Bookmarks ───────────────────────────────────────────────────────────────
+
+// GetBookmarks returns all bookmarks for a project.
+func (a *App) GetBookmarks(projectPath string) ([]translation.Bookmark, error) {
+	p, err := a.getOrLoad(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	bookmarks := p.GetBookmarks()
+	if bookmarks == nil {
+		bookmarks = []translation.Bookmark{}
+	}
+	return bookmarks, nil
+}
+
+// AddBookmark adds or updates a bookmark at the given paragraph index.
+func (a *App) AddBookmark(projectPath string, index int, note string) error {
+	p, err := a.getOrLoad(projectPath)
+	if err != nil {
+		return err
+	}
+	p.AddBookmark(index, note)
+	if _, err := p.Save(); err != nil {
+		return fmt.Errorf("could not save project: %w", err)
+	}
+	return nil
+}
+
+// DeleteBookmark removes the bookmark at the given paragraph index.
+func (a *App) DeleteBookmark(projectPath string, index int) error {
+	p, err := a.getOrLoad(projectPath)
+	if err != nil {
+		return err
+	}
+	p.DeleteBookmark(index)
+	if _, err := p.Save(); err != nil {
+		return fmt.Errorf("could not save project: %w", err)
+	}
+	return nil
+}
+
 // ─── Cover helpers ───────────────────────────────────────────────────────────
 
 // coverPathForProject returns the filesystem path where the cover image is stored.
@@ -861,6 +907,7 @@ func (a *App) GetSettings() Settings {
 		SourceLanguage:     config.Options.SourceLanguage,
 		TargetLanguage:     config.Options.TargetLanguage,
 		DarkMode:           config.Options.DarkMode,
+		FixModel:           config.Options.FixModel,
 	}
 }
 
@@ -874,6 +921,7 @@ func (a *App) SaveSettings(s Settings) error {
 	config.Options.SourceLanguage = s.SourceLanguage
 	config.Options.TargetLanguage = s.TargetLanguage
 	config.Options.DarkMode = s.DarkMode
+	config.Options.FixModel = s.FixModel
 	return config.SaveOptions()
 }
 

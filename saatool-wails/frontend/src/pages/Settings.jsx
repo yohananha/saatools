@@ -36,6 +36,7 @@ function Section({ title, children }) {
 export default function Settings({ theme, onThemeChange }) {
   const [s, setS]       = useState(null)
   const [saving, setSaving] = useState(false)
+  const [keepScreenOn, setKeepScreenOnLocal] = useState(() => localStorage.getItem('keepScreenOn') !== 'false')
 
   useEffect(() => {
     GetSettings().then(setS).catch(e => toast(`Could not load settings: ${e}`, 'error'))
@@ -120,6 +121,19 @@ export default function Settings({ theme, onThemeChange }) {
         </Row>
       </Section>
 
+      <Section title="Reading">
+        <Row label="Keep screen on" hint="Prevent screen from sleeping while reading">
+          <Toggle
+            checked={keepScreenOn}
+            onChange={v => {
+              setKeepScreenOnLocal(v)
+              localStorage.setItem('keepScreenOn', String(v))
+              window.AndroidBridge?.setKeepScreenOn(v)
+            }}
+          />
+        </Row>
+      </Section>
+
       <Section title="Translation">
         <Row label="Translate ahead" hint="Paragraphs to pre-translate">
           <input
@@ -134,6 +148,16 @@ export default function Settings({ theme, onThemeChange }) {
             checked={s.autoProofread}
             onChange={v => set('autoProofread', v)}
           />
+        </Row>
+        <Row label="Fix model" hint="Model used when tapping the Fix button">
+          <select
+            className="settings-input"
+            value={s.fixModel || 'deepseek-chat'}
+            onChange={e => set('fixModel', e.target.value)}
+          >
+            <option value="deepseek-chat">Chat (fast)</option>
+            <option value="deepseek-reasoner">Reasoner (thorough)</option>
+          </select>
         </Row>
         <Row label="Context doc size" hint="Paragraphs of context sent to AI">
           <input

@@ -170,6 +170,20 @@ export const DeleteGlossaryEntry = (path, term) =>
   isWails() ? WailsApp.DeleteGlossaryEntry(path, term)
             : apiFetch('DELETE', '/api/glossary', { path, term })
 
+// ── Bookmarks ─────────────────────────────────────────────────────────────
+
+export const GetBookmarks = (path) =>
+  isWails() ? WailsApp.GetBookmarks(path)
+            : apiFetch('GET', `/api/bookmarks?path=${encodeURIComponent(path)}`)
+
+export const AddBookmark = (path, index, note) =>
+  isWails() ? WailsApp.AddBookmark(path, index, note)
+            : apiFetch('POST', '/api/bookmarks', { path, index, note })
+
+export const DeleteBookmark = (path, index) =>
+  isWails() ? WailsApp.DeleteBookmark(path, index)
+            : apiFetch('DELETE', '/api/bookmarks', { path, index })
+
 // ── Log ───────────────────────────────────────────────────────────────────
 
 export const GetLog = () =>

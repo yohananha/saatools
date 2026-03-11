@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -61,6 +63,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
+
             // Required to make <input type="file"> work in WebView.
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(
@@ -105,6 +109,16 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack()
         else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun setKeepScreenOn(on: Boolean) {
+            runOnUiThread {
+                if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
     }
 
     companion object {

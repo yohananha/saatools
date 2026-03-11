@@ -1,6 +1,15 @@
+import java.util.Properties
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+}
+
+// Load signing properties from local.properties
+def localProps = new Properties()
+def localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localPropsFile.withReader('UTF-8') { localProps.load(it) }
 }
 
 android {
@@ -15,9 +24,23 @@ android {
         versionName "1.0"
     }
 
-    buildTypes {
+    signingConfigs {
         release {
-            minifyEnabled false
+            storeFile     file(localProps['storeFile'] ?: 'saatool.jks')
+            storePassword localProps['storePassword'] ?: ''
+            keyAlias      localProps['keyAlias']      ?: 'saatool'
+            keyPassword   localProps['keyPassword']   ?: ''
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.release
+        }
+        release {
+            signingConfig    signingConfigs.release
+            minifyEnabled    false
+            shrinkResources  false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -30,7 +53,6 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
-
 }
 
 dependencies {

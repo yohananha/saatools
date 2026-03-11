@@ -7,6 +7,9 @@ saatool-wails/*.exe
 saatool-wails/saatool-wails
 saatool-android/server/frontend/dist/
 
+# Android signing (never commit keystores)
+android/*.jks
+
 # Android generated files
 android/app/libs/*.aar
 android/app/build/

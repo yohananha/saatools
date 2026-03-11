@@ -485,6 +485,59 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ─── Bookmarks ───────────────────────────────────────────────────────────────
+
+func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
+	method := r.Method
+	if override := r.Header.Get("X-HTTP-Method"); override != "" {
+		method = override
+	}
+
+	switch method {
+	case http.MethodGet:
+		bookmarks, err := s.app.GetBookmarks(queryStr(r, "path"))
+		if err != nil {
+			writeErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, bookmarks)
+
+	case http.MethodPost:
+		var body struct {
+			Path  string `json:"path"`
+			Index int    `json:"index"`
+			Note  string `json:"note"`
+		}
+		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.app.AddBookmark(body.Path, body.Index, body.Note); err != nil {
+			writeErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodDelete:
+		var body struct {
+			Path  string `json:"path"`
+			Index int    `json:"index"`
+		}
+		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.app.DeleteBookmark(body.Path, body.Index); err != nil {
+			writeErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.NotFound(w, r)
+	}
+}
+
 // ─── Log ─────────────────────────────────────────────────────────────────────
 
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {

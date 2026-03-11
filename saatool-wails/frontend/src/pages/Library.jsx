@@ -9,6 +9,30 @@ import {
 } from '../api'
 import { toast } from '../App'
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+const STYLE_STOP = new Set([
+  'a','an','the','and','or','but','while','with','of','in','to','is','are',
+  'that','this','it','very','which','by','as','at','for','on','its','into',
+  'from','also','between','both','some','more','less','often','can','may',
+])
+
+function titleCase(s) {
+  return s.replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/**
+ * Extracts the most meaningful 1-3 words from a writing-style phrase,
+ * skipping articles/prepositions/conjunctions and applying title case.
+ * e.g. "while the pacing varies" → "Pacing Varies"
+ *      "clinical and analytical"  → "Clinical Analytical"
+ */
+function shortenStyle(s) {
+  const words = s.trim().split(/\s+/)
+  const meaningful = words.filter(w => !STYLE_STOP.has(w.toLowerCase().replace(/[^a-z]/g, '')))
+  const selected = (meaningful.length >= 1 ? meaningful : words).slice(0, 3)
+  return titleCase(selected.join(' '))
+}
+
 // ── Accent palette — fallback when no cover image is available ─────────────
 const COVERS = [
   ['#7c3aed','#a78bfa'], ['#0369a1','#38bdf8'],
@@ -69,6 +93,12 @@ function ImportModal({ onClose, onImported }) {
       toast(`Imported "${info.title || info.name}"`, 'success')
       onImported(info)
       onClose()
+      // Auto-fetch book details for new EPUB imports (fire-and-forget)
+      if (mode === 'epub' && info.path) {
+        FetchBookDetails(info.path)
+          .then(() => toast(`Book details fetched for "${info.title || info.name}"`, 'success'))
+          .catch(() => {})
+      }
     } catch (e) {
       toast(`Import failed: ${e}`, 'error')
     } finally {
@@ -383,6 +413,18 @@ export default function Library({ onOpenReader }) {
   const [showImport,   setShowImport]   = useState(false)
   const [confirmDel,   setConfirmDel]   = useState(null)   // ProjectInfo | null
   const [bookInfo,     setBookInfo]     = useState(null)   // ProjectInfo | null
+  const [filterOpen,   setFilterOpen]   = useState(false)
+  const [filters,      setFilters]      = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('libraryFilters') || '{}')
+      return {
+        statuses: new Set(s.statuses || []),
+        authors:  new Set(s.authors  || []),
+        genres:   new Set(s.genres   || []),
+        styles:   new Set(s.styles   || []),
+      }
+    } catch { return { statuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() } }
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -397,6 +439,37 @@ export default function Library({ onOpenReader }) {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    if (!filterOpen) return
+    const handler = () => setFilterOpen(false)
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [filterOpen])
+
+  // Persist filter state
+  useEffect(() => {
+    localStorage.setItem('libraryFilters', JSON.stringify({
+      statuses: [...filters.statuses],
+      authors:  [...filters.authors],
+      genres:   [...filters.genres],
+      styles:   [...filters.styles],
+    }))
+  }, [filters])
+
+  function toggleFilter(section, value) {
+    setFilters(prev => {
+      const s = new Set(prev[section])
+      if (s.has(value)) s.delete(value)
+      else s.add(value)
+      return { ...prev, [section]: s }
+    })
+  }
+
+  function clearFilters() {
+    setFilters({ statuses: new Set(), authors: new Set(), genres: new Set(), styles: new Set() })
+  }
 
   async function handleOpen(info) {
     try {
@@ -439,6 +512,45 @@ export default function Library({ onOpenReader }) {
     }
   }
 
+  // ── Filter + sort logic ────────────────────────────────────────────────
+  function bookStatus(p) {
+    const pct = p.total > 0 ? (p.translated / p.total) * 100 : 0
+    if (pct >= 100) return 'completed'
+    if (pct > 0)    return 'in_progress'
+    return 'not_started'
+  }
+
+  const STATUS_ORDER = { in_progress: 0, not_started: 1, completed: 2 }
+  const STATUS_LABELS = { in_progress: 'In Progress', completed: 'Completed', not_started: 'Not Started' }
+
+  const isFilterActive = filters.statuses.size > 0 || filters.authors.size > 0 ||
+                         filters.genres.size > 0 || filters.styles.size > 0
+
+  const allAuthors = [...new Set(projects.map(p => p.author).filter(Boolean))].sort()
+  const allGenres  = [...new Set(
+    projects.flatMap(p => p.genre ? p.genre.split(',').map(g => g.trim()).filter(Boolean) : [])
+  )].sort()
+  const allStyles  = [...new Set(
+    projects.flatMap(p => p.writingStyle ? p.writingStyle.split(',').map(s => shortenStyle(s)).filter(Boolean) : [])
+  )].sort()
+
+  const visibleProjects = projects
+    .filter(p => {
+      const status = bookStatus(p)
+      if (filters.statuses.size && !filters.statuses.has(status)) return false
+      if (filters.authors.size && p.author && !filters.authors.has(p.author)) return false
+      if (filters.genres.size) {
+        const bookGenres = p.genre ? p.genre.split(',').map(g => g.trim()).filter(Boolean) : []
+        if (!bookGenres.some(g => filters.genres.has(g))) return false
+      }
+      if (filters.styles.size) {
+        const bookStyles = p.writingStyle ? p.writingStyle.split(',').map(s => shortenStyle(s)).filter(Boolean) : []
+        if (!bookStyles.some(s => filters.styles.has(s))) return false
+      }
+      return true
+    })
+    .sort((a, b) => STATUS_ORDER[bookStatus(a)] - STATUS_ORDER[bookStatus(b)])
+
   return (
     <div className="library-page">
       <div className="page-header">
@@ -448,21 +560,104 @@ export default function Library({ onOpenReader }) {
         </button>
       </div>
 
+      {projects.length > 0 && (
+        <div className="library-filters" style={{ position: 'relative' }}>
+          <button
+            className={`filter-toggle-btn${isFilterActive ? ' active' : ''}${filterOpen ? ' open' : ''}`}
+            onClick={e => { e.stopPropagation(); setFilterOpen(o => !o) }}
+          >
+            {/* funnel icon */}
+            <svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor" aria-hidden="true">
+              <path d="M0 0h13v1.8L8 6v5l-3-1.5V6L0 1.8z"/>
+            </svg>
+            Filters
+            {isFilterActive && (
+              <span className="filter-badge">
+                {filters.statuses.size + filters.authors.size + filters.genres.size + filters.styles.size}
+              </span>
+            )}
+            <span className="filter-chevron">▾</span>
+          </button>
+          {isFilterActive && (
+            <button className="filter-clear-btn" onClick={e => { e.stopPropagation(); clearFilters() }}>
+              ✕ Clear
+            </button>
+          )}
+          {filterOpen && (
+            <div className="filter-dropdown" onClick={e => e.stopPropagation()}>
+              <div className="filter-section">
+                <div className="filter-section-title">Reading Status</div>
+                {['in_progress', 'completed', 'not_started'].map(s => (
+                  <label key={s} className="filter-check-row">
+                    <input type="checkbox" checked={filters.statuses.has(s)}
+                      onChange={() => toggleFilter('statuses', s)} />
+                    <span>{STATUS_LABELS[s]}</span>
+                  </label>
+                ))}
+              </div>
+              {allAuthors.length > 0 && (
+                <div className="filter-section">
+                  <div className="filter-section-title">By Author</div>
+                  {allAuthors.map(a => (
+                    <label key={a} className="filter-check-row">
+                      <input type="checkbox" checked={filters.authors.has(a)}
+                        onChange={() => toggleFilter('authors', a)} />
+                      <span>{a}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {allGenres.length > 0 && (
+                <div className="filter-section">
+                  <div className="filter-section-title">By Genre</div>
+                  {allGenres.map(g => (
+                    <label key={g} className="filter-check-row">
+                      <input type="checkbox" checked={filters.genres.has(g)}
+                        onChange={() => toggleFilter('genres', g)} />
+                      <span>{g}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {allStyles.length > 0 && (
+                <div className="filter-section">
+                  <div className="filter-section-title">By Writing Style</div>
+                  {allStyles.map(st => (
+                    <label key={st} className="filter-check-row">
+                      <input type="checkbox" checked={filters.styles.has(st)}
+                        onChange={() => toggleFilter('styles', st)} />
+                      <span>{st}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
           <div className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
         </div>
-      ) : projects.length === 0 ? (
-        <div className="empty-library">
-          <span className="empty-icon">📚</span>
-          <p>No books yet</p>
-          <button className="btn primary" onClick={() => setShowImport(true)}>
-            Import your first book
-          </button>
-        </div>
+      ) : visibleProjects.length === 0 ? (
+        projects.length === 0 ? (
+          <div className="empty-library">
+            <span className="empty-icon">📚</span>
+            <p>No books yet</p>
+            <button className="btn primary" onClick={() => setShowImport(true)}>
+              Import your first book
+            </button>
+          </div>
+        ) : (
+          <div className="empty-library">
+            <span className="empty-icon">🔍</span>
+            <p>No books in this category</p>
+          </div>
+        )
       ) : (
         <div className="book-grid">
-          {projects.map(p => (
+          {visibleProjects.map(p => (
             <BookCard
               key={p.path}
               info={p}

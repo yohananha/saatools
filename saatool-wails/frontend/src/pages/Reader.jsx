@@ -28,7 +28,7 @@ function GlossaryModal({ term: initTerm, initial, termEditable, onSave, onDelete
           <label>Source term</label>
           {termEditable
             ? <input className="form-input" value={term} onChange={e => setTerm(e.target.value)}
-                placeholder="Source term…" autoFocus />
+                placeholder="Source term…" autoFocus maxLength={50} />
             : <div className="form-input" style={{ opacity: .72 }}>{term}</div>
           }
         </div>
@@ -37,7 +37,7 @@ function GlossaryModal({ term: initTerm, initial, termEditable, onSave, onDelete
           <input className="form-input" value={target} dir="auto"
             onChange={e => setTarget(e.target.value)}
             autoFocus={!termEditable}
-            placeholder="Enter translation…" />
+            placeholder="Enter translation…" maxLength={50} />
         </div>
         <div className="modal-actions">
           {!termEditable && initial && (
@@ -124,6 +124,37 @@ function BookmarkListModal({ bookmarks, paragraphTexts, onNavigate, onEdit, onDe
   )
 }
 
+// ── GlossaryListModal ──────────────────────────────────────────────────────────
+function GlossaryListModal({ glossary, onAdd, onEdit, onClose }) {
+  const entries = Object.entries(glossary).sort(([a], [b]) => a.localeCompare(b))
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal book-info-modal" onClick={e => e.stopPropagation()}>
+        <h2>📖 Glossary ({entries.length})</h2>
+        {entries.length === 0 && (
+          <p style={{ color: 'var(--fg-muted)', fontSize: 14, margin: '12px 0' }}>
+            No entries yet. Tap <strong>+ Add</strong> or select text in the reader.
+          </p>
+        )}
+        {entries.map(([term, trans]) => (
+          <div key={term} className="bookmark-list-row">
+            <div className="bookmark-list-left" style={{ cursor: 'pointer' }} onClick={() => onEdit(term, trans)}>
+              <span className="bookmark-para-num">{term}</span>
+              {trans && <span className="bookmark-note">{trans}</span>}
+            </div>
+            <button className="btn" style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
+              onClick={() => onEdit(term, trans)}>✏</button>
+          </div>
+        ))}
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn primary" onClick={onAdd}>+ Add</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Page state ───────────────────────────────────────────────────────────
   const [pageStart,      setPageStart]      = useState(0)       // first para index on this page
@@ -155,6 +186,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const [bookmarks,        setBookmarks]        = useState([])
   const [bookmarkModal,    setBookmarkModal]    = useState(null) // {index, existing} | null
   const [showBookmarkList, setShowBookmarkList] = useState(false)
+  const [showGlossaryList, setShowGlossaryList] = useState(false)
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const overlayTimer = useRef(null)
@@ -584,6 +616,10 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
                   📑 {bookmarks.length}
                 </button>
               )}
+              <button className="btn overlay-btn" onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
+                title="Glossary">
+                📖{Object.keys(glossary).length > 0 ? ` ${Object.keys(glossary).length}` : ''}
+              </button>
             </div>
           </div>
         )}
@@ -632,6 +668,16 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           onEdit={(b) => { setShowBookmarkList(false); setBookmarkModal({ index: b.index, existing: b }) }}
           onDelete={handleDeleteBookmark}
           onClose={() => setShowBookmarkList(false)}
+        />
+      )}
+
+      {/* ── Glossary list modal ── */}
+      {showGlossaryList && (
+        <GlossaryListModal
+          glossary={glossary}
+          onAdd={() => { setShowGlossaryList(false); setGlossaryModal({ term: '', initial: '', termEditable: true }) }}
+          onEdit={(term, trans) => { setShowGlossaryList(false); setGlossaryModal({ term, initial: trans, termEditable: false }) }}
+          onClose={() => setShowGlossaryList(false)}
         />
       )}
 

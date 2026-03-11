@@ -691,13 +691,13 @@ func (a *App) GetGlossary(projectPath string) (map[string]string, error) {
 // SetGlossaryEntry adds or updates a glossary entry, saves the project, and
 // rebuilds the translator so the new term is used in subsequent translations.
 func (a *App) SetGlossaryEntry(projectPath, sourceTerm, targetTerm string) error {
-	// Match the handler-layer limit (300 chars = sanitizeGlossaryText cap).
-	const maxTermLen = 300
+	// Match the handler-layer limit (50 chars = sanitizeGlossaryText cap).
+	const maxTermLen = 50
 	if sourceTerm == "" {
 		return fmt.Errorf("term cannot be empty")
 	}
 	if len(sourceTerm) > maxTermLen || len(targetTerm) > maxTermLen {
-		return fmt.Errorf("term exceeds maximum length of %d characters", maxTermLen)
+		return fmt.Errorf("term exceeds maximum length of %d chars", maxTermLen)
 	}
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {

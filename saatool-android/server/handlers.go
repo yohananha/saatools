@@ -545,14 +545,14 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 		}
 		// Prevent empty terms and enforce a reasonable length limit to reduce
 		// the surface area for AI prompt injection via crafted glossary entries.
-		// Matches sanitizeGlossaryText's 300-char cap in project.go.
-		const maxTermLen = 300
+		// Matches sanitizeGlossaryText's 50-char cap in project.go.
+		const maxTermLen = 50
 		if body.Term == "" {
 			writeErr(w, fmt.Errorf("term cannot be empty"), http.StatusBadRequest)
 			return
 		}
 		if len(body.Term) > maxTermLen || len(body.TargetTerm) > maxTermLen {
-			writeErr(w, fmt.Errorf("term exceeds maximum length of %d characters", maxTermLen), http.StatusBadRequest)
+			writeErr(w, fmt.Errorf("term exceeds maximum length of %d chars", maxTermLen), http.StatusBadRequest)
 			return
 		}
 		if err := s.app.SetGlossaryEntry(body.Path, body.Term, body.TargetTerm); err != nil {

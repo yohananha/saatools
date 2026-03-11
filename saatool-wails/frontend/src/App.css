@@ -79,19 +79,20 @@ html, body, #root {
 /* ── Bottom Nav ──────────────────────────────────────────────────────── */
 .bottom-nav {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   padding: 6px 12px;
   background: var(--nav-bg);
   border-top: 1px solid var(--nav-border);
   flex-shrink: 0;
-  position: relative;
 }
 
-.nav-tab {
+/* All three nav items (Library, Settings, theme toggle) share this base */
+.nav-tab, .theme-btn {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 3px;
   padding: 8px 4px;
   border-radius: var(--radius-sm);
@@ -104,26 +105,13 @@ html, body, #root {
   font-weight: 500;
   transition: color var(--transition), background var(--transition);
 }
-.nav-tab:hover { background: var(--btn); color: var(--fg); }
+.nav-tab:hover, .theme-btn:hover { background: var(--btn); color: var(--fg); }
 .nav-tab.active { color: var(--accent); }
 .nav-tab .nav-icon { font-size: 20px; line-height: 1; }
 
 .nav-spacer { display: none; }
 
-.theme-btn {
-  position: absolute;
-  right: 12px;
-  width: 38px; height: 38px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  background: var(--btn);
-  border: none;
-  cursor: pointer;
-  color: var(--fg);
-  transition: background var(--transition), transform var(--transition);
-}
-.theme-btn:hover { background: var(--btn-hover); transform: scale(1.08); }
+.theme-btn { font-size: 20px; }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }

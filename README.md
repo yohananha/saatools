@@ -1,6 +1,6 @@
-# SaaTools — Monorepo Overview
+# Babel Reader — Monorepo Overview
 
-A book translation tool that uses AI (DeepSeek / Ollama) to translate EPUBs paragraph by paragraph.
+An AI-powered EPUB reader and translator that uses DeepSeek to translate books paragraph by paragraph.
 Available as both a **Windows/macOS/Linux desktop app** (Wails) and an **Android APK** (WebView + Go HTTP server).
 
 ---
@@ -13,7 +13,9 @@ saatools/
 ├── saatool-wails/     ← Desktop app (Go + React) — Wails shell
 ├── saatool-android/   ← Android bridge (Go)      — HTTP server + gomobile
 ├── android/           ← Android app (Kotlin)     — WebView shell
-└── build-android.bat  ← One-click build + install script
+├── build-android.bat  ← One-click build + install script
+├── README.md
+└── CHANGELOG.md
 ```
 
 ---
@@ -26,7 +28,7 @@ The engine. Contains all business logic — no UI whatsoever.
 - Parses and imports EPUB files
 - Manages translation projects (`.spz` files)
 - Calls AI translation APIs (DeepSeek, Ollama)
-- Manages glossary, positions, book metadata
+- Manages glossary, bookmarks, reading position, book metadata
 - Handles file storage (respects `$FILESDIR` env var for Android paths)
 
 **Has its own git repository** (`github.com/dtylman/saatool`).
@@ -47,15 +49,15 @@ saatool-wails/
     ├── package.json    ← React 18 + Vite 5 (no component library)
     └── src/
         ├── main.jsx
-        ├── App.jsx     ← Shell: routing, theme, toast, bottom nav
+        ├── App.jsx     ← Shell: routing, theme, toast, bottom nav (Library + Settings + toggle)
         ├── App.css     ← All styles (single global CSS file)
         ├── api/
         │   └── index.js  ← Auto-detects Wails vs HTTP mode
         └── pages/
-            ├── Library.jsx   ← Book grid, import modal
-            ├── Reader.jsx    ← Paged reader (tap to navigate, RTL support)
-            ├── Settings.jsx  ← AI keys, language defaults
-            └── Log.jsx       ← Translation activity log
+            ├── Library.jsx   ← Book grid, import modal, filters
+            ├── Reader.jsx    ← Paged reader (tap to navigate, RTL support, bookmarks, glossary)
+            ├── Settings.jsx  ← AI keys, language defaults, inline log viewer
+            └── Log.jsx       ← Translation activity log (standalone or inline)
 ```
 
 **Run desktop app:**
@@ -86,7 +88,7 @@ saatool-android/
 **Build AAR:**
 ```bat
 cd saatool-android
-gomobile bind -target=android -androidapi 26 -o ..\android\app\libs\saatool-android.aar ./mobile/
+gomobile bind -target android -androidapi 26 -o ..\android\app\libs\saatool-android.aar ./mobile/
 ```
 
 ---
@@ -103,7 +105,10 @@ android/
     ├── libs/
     │   └── saatool-android.aar   ← compiled Go binary (generated, not in git)
     └── src/main/
-        ├── AndroidManifest.xml
+        ├── AndroidManifest.xml   ← label="Babel Reader", icon=@mipmap/ic_launcher
+        ├── res/
+        │   ├── mipmap-*/         ← App icon at all densities (mdpi → xxxhdpi)
+        │   └── values/colors.xml ← Adaptive icon background (#0D2153)
         └── java/com/saatool/app/
             ├── GoServerService.kt  ← Starts the Go HTTP server as a foreground service
             └── MainActivity.kt     ← Hides nav bar, shows fullscreen WebView → localhost:8766
@@ -112,8 +117,27 @@ android/
 **Build APK:**
 ```bat
 cd android
-gradlew assembleDebug
+gradlew assembleRelease
 ```
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **EPUB import** | Import any EPUB for translation or direct reading |
+| **Direct read** | Import with "Read as-is" — no translation, no language fields |
+| **AI translation** | Paragraph-by-paragraph via DeepSeek API (batch of 5) |
+| **Proofread / Fix** | Post-process translations with a second AI pass |
+| **Bookmarks** | Named bookmarks per book, accessible from the reader overlay |
+| **Glossary** | Per-book glossary with tap-to-lookup in reader |
+| **Reading position** | Book reopens at the last read paragraph |
+| **Dual progress bar** | Separate reading progress (green) and translation progress (accent) |
+| **Library filters** | Filter by status, author, genre, writing style; genre tags auto-merged |
+| **Book details** | AI-assisted fetch of author, genre, synopsis, characters |
+| **Dark / light mode** | Persistent theme toggle in nav bar |
+| **RTL support** | Right-to-left paragraph layout for Hebrew, Arabic, etc. |
 
 ---
 
@@ -138,7 +162,7 @@ saatool-wails/          saatool-android/
 ```
 
 Both apps use the **exact same React frontend** (`saatool-wails/frontend/src/`).
-The `api/index.js` layer auto-detects which environment it is in:
+The `api/index.js` layer auto-detects the environment:
 - `window.go` exists → **Wails mode** (calls Go functions directly via IPC)
 - No `window.go` → **HTTP mode** (calls `http://localhost:8766/api/*` REST endpoints)
 
@@ -147,7 +171,7 @@ The `api/index.js` layer auto-detects which environment it is in:
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+|-------|-----------|
 | Core logic | Go 1.24 |
 | Desktop shell | Wails v2 |
 | Android shell | Kotlin + Android WebView |
@@ -156,7 +180,7 @@ The `api/index.js` layer auto-detects which environment it is in:
 | Build tool | Vite 5 |
 | Styling | Plain CSS (no Tailwind, no component library) |
 | Fonts | Inter (UI) + Lora (reader) via Google Fonts |
-| AI backends | DeepSeek API, Ollama (local) |
+| AI backend | DeepSeek API (`deepseek-chat` + `deepseek-reasoner`) |
 
 ---
 
@@ -164,51 +188,49 @@ The `api/index.js` layer auto-detects which environment it is in:
 
 Run from the repo root (`saatools/`):
 
-```bat
-:: 1. Build React
-cd saatool-wails\frontend && npm run build && cd ..\..
+```bash
+# 1. Build React
+cd saatool-wails/frontend && npm run build && cd ../..
 
-:: 2. Copy React dist into Go embed dir
-xcopy /E /I /Y saatool-wails\frontend\dist saatool-android\server\frontend\dist
+# 2. Copy React dist into Go embed dir
+cp -r saatool-wails/frontend/dist saatool-android/server/frontend/dist
 
-:: 3. Build Go AAR
+# 3. Build Go AAR
 cd saatool-android
-gomobile bind -target=android -androidapi 26 -o ..\android\app\libs\saatool-android.aar ./mobile/
+gomobile bind -target android -androidapi 26 -o ../android/app/libs/saatool-android.aar ./mobile/
 cd ..
 
-:: 4. Build APK
-cd android && gradlew assembleDebug && cd ..
+# 4. Build APK
+cd android && gradlew assembleRelease && cd ..
 
-:: 5. Install on connected device
-adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+# 5. Install on connected device
+adb install -r android/app/build/outputs/apk/release/app-release.apk
 ```
 
-Or just run **`build-android.bat`** at the repo root — it does all five steps automatically.
+Or run **`build-android.bat`** at the repo root — it does all five steps automatically.
+
+> **Tip (bash/PowerShell):** Steps 3–5 are also in `build_android.ps1` for use after a manual React build+copy.
 
 ---
 
 ## Prerequisites
 
 | Tool | Purpose |
-|---|---|
+|------|---------|
 | Go 1.22+ | Build everything |
 | Node.js 18+ | Build the React frontend |
 | Wails v2 CLI | Desktop app (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`) |
 | gomobile | Android AAR (`go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init`) |
-| Android Studio | Android SDK, NDK r25c+, emulator |
+| Android Studio | Android SDK (API 26+), NDK r29+ |
 | ADB | Install APK on device |
+| Python 3 + Pillow | Regenerate app icon PNGs from source image (`pip install pillow`) |
 
 ---
 
-## Source Control
+## NDK / SDK paths (Windows)
 
-Only `saatool/` has its own git repository. The remaining folders (`saatool-wails/`, `saatool-android/`, `android/`) are not yet tracked. To initialize:
-
-```bat
-cd "C:\Users\Yohanan.H\source\repos\saatools"
-git init
-git add saatool-wails saatool-android android build-android.bat README.md
-git commit -m "Initial commit — Wails desktop + Android port"
 ```
-
-> `saatool/` can optionally be added as a git submodule if you want the full tree tracked from one repo.
+ANDROID_HOME = C:\Users\<user>\AppData\Local\Android\Sdk
+NDK          = C:\Users\<user>\AppData\Local\Android\Sdk\ndk\29.0.14206865
+JAVA_HOME    = C:\Program Files\Android\Android Studio\jbr
+```

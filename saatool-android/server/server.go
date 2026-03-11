@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,19 @@ func (h *wsHub) broadcast(eventType string, payload interface{}) {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // allow WebView origin
+	// Only accept WebSocket connections from localhost origins.
+	// This prevents cross-origin attacks from malicious web pages while still
+	// allowing the embedded Android WebView (http://127.0.0.1:<port>) to connect.
+	// Non-browser clients (no Origin header) are also allowed.
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // not a browser cross-origin request
+		}
+		return strings.HasPrefix(origin, "http://127.0.0.1:") ||
+			strings.HasPrefix(origin, "http://localhost:") ||
+			origin == "file://" // Wails desktop WebView
+	},
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────

@@ -89,20 +89,25 @@ type BroadcastFn func(ev TranslationEvent)
 
 // App holds the application state; a port of saatool-wails/app.go without Wails.
 type App struct {
-	ctx         context.Context
-	mu          sync.Mutex
-	projects    map[string]*translation.Project
-	translators map[string]*ai.Translator
-	broadcast   BroadcastFn
+	ctx            context.Context
+	mu             sync.Mutex
+	projects       map[string]*translation.Project
+	translators    map[string]*ai.Translator
+	broadcast      BroadcastFn
+	// translationSem is a shared semaphore that caps concurrent API calls across
+	// ALL TranslateParagraphs invocations, preventing goroutine accumulation when
+	// the user triggers rapid translate-ahead requests.
+	translationSem chan struct{}
 }
 
 // newApp creates a new App instance.
 func newApp(broadcast BroadcastFn) *App {
 	return &App{
-		ctx:         context.Background(),
-		projects:    make(map[string]*translation.Project),
-		translators: make(map[string]*ai.Translator),
-		broadcast:   broadcast,
+		ctx:            context.Background(),
+		projects:       make(map[string]*translation.Project),
+		translators:    make(map[string]*ai.Translator),
+		broadcast:      broadcast,
+		translationSem: make(chan struct{}, maxConcurrentTranslations),
 	}
 }
 
@@ -137,6 +142,12 @@ func dirStr(d translation.Direction) string {
 }
 
 func (a *App) getOrLoad(projectPath string) (*translation.Project, error) {
+	// Defense-in-depth: reject paths that escape the projects directory even if
+	// the handler layer already validated (guards against future handler gaps).
+	if err := validateProjectPath(projectPath); err != nil {
+		return nil, fmt.Errorf("invalid project path: %w", err)
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -220,6 +231,10 @@ func (a *App) ListProjects() ([]ProjectInfo, error) {
 }
 
 func (a *App) LoadProject(projectPath string) (ProjectInfo, error) {
+	if err := validateProjectPath(projectPath); err != nil {
+		return ProjectInfo{}, fmt.Errorf("invalid project path: %w", err)
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -417,7 +432,6 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 		end = len(p.Source.Paragraphs)
 	}
 
-	sem := make(chan struct{}, maxConcurrentTranslations)
 	for i := fromIndex; i < end; i += translationBatchSize {
 		batchEnd := i + translationBatchSize
 		if batchEnd > end {
@@ -427,9 +441,13 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 		for j := range indices {
 			indices[j] = i + j
 		}
-		sem <- struct{}{}
+		// Block until a slot is free in the shared semaphore. Because the
+		// semaphore lives on the App (not per-call), concurrent invocations
+		// of TranslateParagraphs all compete for the same pool of slots,
+		// capping total concurrent API calls regardless of call frequency.
+		a.translationSem <- struct{}{}
 		go func(batch []int) {
-			defer func() { <-sem }()
+			defer func() { <-a.translationSem }()
 			if err := t.TranslateAndProofReadBatch(a.ctx, batch); err != nil {
 				log.Printf("batch translation error (%v): %v", batch, err)
 			}

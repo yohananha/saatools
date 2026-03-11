@@ -9,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+
+	"github.com/dtylman/saatool/config"
 )
 
 // appTempDir returns a writable temp directory.
@@ -51,6 +54,21 @@ func queryInt(r *http.Request, key string) (int, error) {
 func queryBool(r *http.Request, key string) bool {
 	v := queryStr(r, key)
 	return v == "true" || v == "1"
+}
+
+// validateProjectPath returns an error if projectPath would escape the projects
+// directory. Prevents path-traversal attacks (../../etc/passwd, etc.).
+func validateProjectPath(projectPath string) error {
+	if projectPath == "" {
+		return fmt.Errorf("project path is empty")
+	}
+	projDir := filepath.Clean(config.ProjectsDir())
+	clean := filepath.Clean(projectPath)
+	rel, err := filepath.Rel(projDir, clean)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return fmt.Errorf("invalid project path: must be within projects directory")
+	}
+	return nil
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -105,6 +123,10 @@ func (s *Server) handleLoadProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	info, err := s.app.LoadProject(body.Path)
 	if err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
@@ -125,6 +147,10 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	if err := s.app.DeleteProject(body.Path); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
@@ -141,6 +167,10 @@ func (s *Server) handleSaveProject(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := decodeBody(r, &body); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := validateProjectPath(body.Path); err != nil {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
@@ -245,8 +275,8 @@ func (s *Server) handleExportProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectPath := queryStr(r, "path")
-	if projectPath == "" {
-		writeErr(w, fmt.Errorf("missing 'path' parameter"), http.StatusBadRequest)
+	if err := validateProjectPath(projectPath); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -267,6 +297,10 @@ func (s *Server) handleProjectCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectPath := queryStr(r, "path")
+	if err := validateProjectPath(projectPath); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	cover := s.app.GetProjectCover(projectPath)
 	writeJSON(w, cover)
 }
@@ -279,6 +313,10 @@ func (s *Server) handleParagraphsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectPath := queryStr(r, "path")
+	if err := validateProjectPath(projectPath); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	from, err := queryInt(r, "from")
 	if err != nil {
 		writeErr(w, fmt.Errorf("invalid 'from': %w", err), http.StatusBadRequest)
@@ -306,6 +344,10 @@ func (s *Server) handlePosition(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		projectPath := queryStr(r, "path")
+		if err := validateProjectPath(projectPath); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
 		pos, err := s.app.GetLastPosition(projectPath)
 		if err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
@@ -320,6 +362,10 @@ func (s *Server) handlePosition(w http.ResponseWriter, r *http.Request) {
 			SourceView bool   `json:"sourceView"`
 		}
 		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := validateProjectPath(body.Path); err != nil {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -347,6 +393,10 @@ func (s *Server) handleTranslate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	if err := s.app.TranslateParagraphs(body.Path, body.From); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
@@ -367,6 +417,10 @@ func (s *Server) handleFixTranslation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	if err := s.app.FixTranslation(body.Path, body.Index); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
@@ -380,6 +434,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		projectPath := queryStr(r, "path")
+		if err := validateProjectPath(projectPath); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
 		info, err := s.app.GetBookDetailsInfo(projectPath)
 		if err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
@@ -393,6 +451,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 			BookDetailsInfo
 		}
 		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := validateProjectPath(body.Path); err != nil {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -419,6 +481,10 @@ func (s *Server) handleFetchBookDetails(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
 	info, err := s.app.FetchBookDetails(body.Path)
 	if err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
@@ -439,6 +505,10 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 	switch method {
 	case http.MethodGet:
 		projectPath := queryStr(r, "path")
+		if err := validateProjectPath(projectPath); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
 		glossary, err := s.app.GetGlossary(projectPath)
 		if err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
@@ -459,6 +529,21 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if err := validateProjectPath(body.Path); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		// Prevent empty terms and enforce a reasonable length limit to reduce
+		// the surface area for AI prompt injection via crafted glossary entries.
+		const maxTermLen = 500
+		if body.Term == "" {
+			writeErr(w, fmt.Errorf("term cannot be empty"), http.StatusBadRequest)
+			return
+		}
+		if len(body.Term) > maxTermLen || len(body.TargetTerm) > maxTermLen {
+			writeErr(w, fmt.Errorf("term exceeds maximum length of %d characters", maxTermLen), http.StatusBadRequest)
+			return
+		}
 		if err := s.app.SetGlossaryEntry(body.Path, body.Term, body.TargetTerm); err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
 			return
@@ -471,6 +556,10 @@ func (s *Server) handleGlossary(w http.ResponseWriter, r *http.Request) {
 			Term string `json:"term"`
 		}
 		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := validateProjectPath(body.Path); err != nil {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -495,7 +584,12 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 
 	switch method {
 	case http.MethodGet:
-		bookmarks, err := s.app.GetBookmarks(queryStr(r, "path"))
+		projectPath := queryStr(r, "path")
+		if err := validateProjectPath(projectPath); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		bookmarks, err := s.app.GetBookmarks(projectPath)
 		if err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
 			return
@@ -512,6 +606,14 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if err := validateProjectPath(body.Path); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if body.Index < 0 {
+			writeErr(w, fmt.Errorf("bookmark index cannot be negative"), http.StatusBadRequest)
+			return
+		}
 		if err := s.app.AddBookmark(body.Path, body.Index, body.Note); err != nil {
 			writeErr(w, err, http.StatusInternalServerError)
 			return
@@ -524,6 +626,10 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 			Index int    `json:"index"`
 		}
 		if err := decodeBody(r, &body); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := validateProjectPath(body.Path); err != nil {
 			writeErr(w, err, http.StatusBadRequest)
 			return
 		}

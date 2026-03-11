@@ -3,7 +3,6 @@ import { GetSettings } from './api'
 import Library from './pages/Library'
 import Reader  from './pages/Reader'
 import Settings from './pages/Settings'
-import Log from './pages/Log'
 
 // ── Toast system ──────────────────────────────────────────────────────────
 let _addToast = null
@@ -36,7 +35,6 @@ function ToastContainer() {
 const TABS = [
   { id: 'library',  label: 'Library',  icon: '📚' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
-  { id: 'log',      label: 'Log',      icon: '📋' },
 ]
 
 export default function App() {
@@ -84,8 +82,7 @@ export default function App() {
     <div className="app-shell" data-theme={theme}>
       <div className="app-content">
         {page === 'library'  && <Library  onOpenReader={openReader} />}
-        {page === 'settings' && <Settings theme={theme} onThemeChange={setTheme} />}
-        {page === 'log'      && <Log />}
+        {page === 'settings' && <Settings theme={theme} onThemeChange={setTheme} onNavigateTo={setPage} />}
       </div>
 
       <nav className="bottom-nav">

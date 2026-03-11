@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { GetSettings, SaveSettings } from '../api'
 import { toast } from '../App'
+import Log from './Log'
 
 function Toggle({ checked, onChange }) {
   return (
@@ -33,7 +34,7 @@ function Section({ title, children }) {
   )
 }
 
-export default function Settings({ theme, onThemeChange }) {
+export default function Settings({ theme, onThemeChange, onNavigateTo }) {
   const [s, setS]       = useState(null)
   const [saving, setSaving] = useState(false)
   const [keepScreenOn, setKeepScreenOnLocal] = useState(() => localStorage.getItem('keepScreenOn') !== 'false')
@@ -51,9 +52,9 @@ export default function Settings({ theme, onThemeChange }) {
     setSaving(true)
     try {
       await SaveSettings(s)
-      // sync theme to live state
       onThemeChange(s.darkMode ? 'dark' : 'light')
       toast('Settings saved', 'success')
+      onNavigateTo('library')
     } catch (e) {
       toast(`Save failed: ${e}`, 'error')
     } finally {
@@ -180,6 +181,10 @@ export default function Settings({ theme, onThemeChange }) {
           Save
         </button>
       </div>
+
+      <Section title="Logs">
+        <Log inline />
+      </Section>
     </div>
   )
 }

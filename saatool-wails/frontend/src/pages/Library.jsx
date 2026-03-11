@@ -33,6 +33,27 @@ function shortenStyle(s) {
   return titleCase(selected.join(' '))
 }
 
+/**
+ * Normalise a genre tag: trim + title-case, with alias merging for common variants.
+ * "sci-fi" / "Sci Fi" / "science fiction" → "Science Fiction"
+ */
+const GENRE_ALIASES = {
+  'sci fi': 'Science Fiction', 'sci-fi': 'Science Fiction',
+  'scifi': 'Science Fiction', 'science fiction': 'Science Fiction',
+  'sf': 'Science Fiction',
+  'spec fic': 'Speculative Fiction', 'speculative fiction': 'Speculative Fiction',
+  'lit fic': 'Literary Fiction', 'literary fiction': 'Literary Fiction',
+  'ya': 'Young Adult', 'young adult': 'Young Adult',
+  'lgbtq': 'LGBTQ+', 'lgbtq+': 'LGBTQ+', 'lgbt': 'LGBTQ+',
+  'nonfiction': 'Non-Fiction', 'non fiction': 'Non-Fiction', 'non-fiction': 'Non-Fiction',
+  'self help': 'Self-Help', 'self-help': 'Self-Help',
+  'historical fiction': 'Historical Fiction', 'hist fiction': 'Historical Fiction',
+}
+function normalizeGenre(g) {
+  const lower = g.trim().toLowerCase()
+  return GENRE_ALIASES[lower] || titleCase(g.trim())
+}
+
 // ── Accent palette — fallback when no cover image is available ─────────────
 const COVERS = [
   ['#7c3aed','#a78bfa'], ['#0369a1','#38bdf8'],
@@ -547,7 +568,7 @@ export default function Library({ onOpenReader }) {
 
   const allAuthors = [...new Set(projects.map(p => p.author).filter(Boolean))].sort()
   const allGenres  = [...new Set(
-    projects.flatMap(p => p.genre ? p.genre.split(',').map(g => g.trim()).filter(Boolean) : [])
+    projects.flatMap(p => p.genre ? p.genre.split(',').map(g => normalizeGenre(g)).filter(Boolean) : [])
   )].sort()
   const allStyles  = [...new Set(
     projects.flatMap(p => p.writingStyle ? p.writingStyle.split(',').map(s => shortenStyle(s)).filter(Boolean) : [])
@@ -559,7 +580,7 @@ export default function Library({ onOpenReader }) {
       if (filters.statuses.size && !filters.statuses.has(status)) return false
       if (filters.authors.size && p.author && !filters.authors.has(p.author)) return false
       if (filters.genres.size) {
-        const bookGenres = p.genre ? p.genre.split(',').map(g => g.trim()).filter(Boolean) : []
+        const bookGenres = p.genre ? p.genre.split(',').map(g => normalizeGenre(g)).filter(Boolean) : []
         if (!bookGenres.some(g => filters.genres.has(g))) return false
       }
       if (filters.styles.size) {
@@ -692,7 +713,7 @@ export default function Library({ onOpenReader }) {
       {showImport && (
         <ImportModal
           onClose={() => setShowImport(false)}
-          onImported={() => load()}
+          onImported={() => { load(); setShowImport(false) }}
         />
       )}
 

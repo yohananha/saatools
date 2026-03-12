@@ -42,6 +42,11 @@ class MainActivity : AppCompatActivity() {
         // Start the Go server service before setting up the WebView.
         startForegroundService(Intent(this, GoServerService::class.java))
 
+        // Enable Chrome DevTools remote debugging for debug builds only.
+        // Connect via chrome://inspect on a desktop browser while USB-connected.
+        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        WebView.setWebContentsDebuggingEnabled(isDebuggable)
+
         webView = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true

@@ -158,10 +158,14 @@ function GlossaryListModal({ glossary, onAdd, onEdit, onClose }) {
 
 export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Page state ───────────────────────────────────────────────────────────
-  const [pageStart,      setPageStart]      = useState(0)       // first para index on this page
+  // pageStart / nextStart / history are {para, offset} objects where:
+  //   para   = paragraph index (matches GetParagraphsBatch API)
+  //   offset = character offset within that paragraph (0 = start of paragraph)
+  // This allows splitting a long paragraph across pages so text flows continuously.
+  const [pageStart,      setPageStart]      = useState({ para: 0, offset: 0 })
   const [paragraphs,     setParagraphs]     = useState([])      // fetched batch
-  const [nextStart,      setNextStart]      = useState(null)    // first index of next page (null = last page)
-  const [history,        setHistory]        = useState([])      // back-stack of pageStart values
+  const [nextStart,      setNextStart]      = useState(null)    // {para,offset} of next page, null = last page
+  const [history,        setHistory]        = useState([])      // back-stack of {para,offset}
   const [fadeKey,        setFadeKey]        = useState(0)       // incremented on each page load to replay fade-in
 
   // ── UI state ─────────────────────────────────────────────────────────────
@@ -221,7 +225,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     let cancelled = false
     GetLastPosition(project.path).then(pos => {
       if (cancelled) return
-      setPageStart(pos.index)
+      setPageStart({ para: pos.index, offset: 0 })
       setIsSource(pos.sourceView)
     }).catch(() => {})
     return () => { cancelled = true }
@@ -230,7 +234,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Fetch batch whenever pageStart or isSource changes ──────────────────
   useEffect(() => {
     let cancelled = false
-    GetParagraphsBatch(project.path, pageStart, BATCH, isSource)
+    GetParagraphsBatch(project.path, pageStart.para, BATCH, isSource)
       .then(batch => {
         if (cancelled) return
         const items = batch || []
@@ -256,13 +260,16 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     ? paragraphs.slice(0, chapterCutoff)
     : paragraphs
 
-  // ── After-render: measure which paragraph first overflows the container ──
-  // visibleParagraphs is already chapter-clamped, so we only need to check
-  // visual overflow here. The default nextStart is the chapter boundary
-  // (if any); visual overflow can only make it earlier.
+  // ── After-render: measure overflow and compute next page start ───────────
+  // For paragraphs that straddle the bottom of the clip zone, we use
+  // document.caretRangeFromPoint / caretPositionFromPoint to find the exact
+  // character where the text crosses the clip boundary, enabling true continuous
+  // text flow (a paragraph can be split across pages).
   useLayoutEffect(() => {
     // Default: chapter boundary (null if no boundary in this batch)
-    const defaultNext = chapterCutoff > 0 ? pageStart + chapterCutoff : null
+    const defaultNext = chapterCutoff > 0
+      ? { para: pageStart.para + chapterCutoff, offset: 0 }
+      : null
 
     if (!clipRef.current || visibleParagraphs.length === 0) {
       setNextStart(defaultNext)
@@ -270,9 +277,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
       return
     }
 
-    // clipRef is the inner .reader-text-clip div whose border IS the clip line.
-    // Its bottom == container.bottom - paddingBottom (padding is on the outer div).
-    // Clamp to window.innerHeight as a safety net for Android WebView.
     const clipBottom = Math.min(
       clipRef.current.getBoundingClientRect().bottom,
       window.innerHeight
@@ -283,16 +287,35 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     for (let i = 0; i < visibleParagraphs.length; i++) {
       const el = paraRefs.current[i]
       if (!el) continue
-      if (el.getBoundingClientRect().bottom > clipBottom) {
-        // Visual overflow — always advance at least 1 paragraph per page
-        next    = pageStart + Math.max(1, i)
+      const elBottom = el.getBoundingClientRect().bottom
+      if (elBottom <= clipBottom) continue
+
+      const elTop = el.getBoundingClientRect().top
+      if (elTop >= clipBottom) {
+        // Entire paragraph is below the fold — push it whole to the next page
+        next    = { para: visibleParagraphs[Math.max(0, i)].index, offset: 0 }
         fitting = Math.max(1, i)
         break
       }
+
+      // Paragraph straddles the fold — find the character at the clip boundary
+      // so the overflow text continues on the next page instead of being lost.
+      const charOffset = caretOffsetAtY(el, clipBottom)
+      if (charOffset !== null && charOffset > 0) {
+        // charOffset is relative to the rendered text; add back the slice offset
+        // that was applied to the first paragraph on this page.
+        const absOffset = (i === 0 ? pageStart.offset : 0) + charOffset
+        next = { para: visibleParagraphs[i].index, offset: absOffset }
+      } else {
+        // Fallback: caret detection unavailable — push whole paragraph to next page
+        next = { para: visibleParagraphs[Math.max(0, i)].index, offset: 0 }
+      }
+      fitting = Math.max(1, i)
+      break
     }
     setNextStart(next)
     setFittingCount(fitting)
-  }, [paragraphs, fontSize])
+  }, [paragraphs, fontSize, pageStart])
 
   // ── Listen for translation:complete events ───────────────────────────────
   useEffect(() => {
@@ -320,13 +343,13 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Trigger translation when viewing target mode ─────────────────────────
   useEffect(() => {
     if (!isSource) {
-      TranslateParagraphs(project.path, pageStart).catch(() => {})
+      TranslateParagraphs(project.path, pageStart.para).catch(() => {})
     }
   }, [isSource, pageStart, project.path])
 
   // ── Save position on every page/view change ──────────────────────────────
   useEffect(() => {
-    SavePosition(project.path, pageStart, isSource).catch(() => {})
+    SavePosition(project.path, pageStart.para, isSource).catch(() => {})
   }, [project.path, pageStart, isSource])
 
   // ── Load glossary on project open ────────────────────────────────────────
@@ -365,6 +388,23 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── RTL detection (based on first paragraph's direction) ─────────────────
   const isRtl = paragraphs[0]?.direction === 'rtl'
 
+  // ── Character-level caret detection ──────────────────────────────────────
+  // Returns the character offset within `el`'s text content at viewport y=`y`.
+  // Uses caretRangeFromPoint (Chrome/WebView) with a caretPositionFromPoint fallback (Firefox).
+  function caretOffsetAtY(el, y) {
+    const x = el.getBoundingClientRect().left + 4
+    if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(x, y - 1)
+      if (range?.startContainer?.nodeType === Node.TEXT_NODE && el.contains(range.startContainer)) {
+        return range.startOffset
+      }
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y - 1)
+      if (pos && el.contains(pos.offsetNode)) return pos.offset
+    }
+    return null
+  }
+
   // ── Navigation ────────────────────────────────────────────────────────────
   function navigate(delta) {
     if (delta > 0) {
@@ -378,10 +418,10 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         setHistory(h => h.slice(0, -1))
         setParagraphs([])
         setPageStart(prev)
-      } else if (pageStart > 0) {
+      } else if (pageStart.para > 0 || pageStart.offset > 0) {
         // No history — jump back by one page worth of paragraphs
         setParagraphs([])
-        setPageStart(Math.max(0, pageStart - fittingCount))
+        setPageStart({ para: Math.max(0, pageStart.para - fittingCount), offset: 0 })
       }
     }
   }
@@ -473,7 +513,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Bookmarks ─────────────────────────────────────────────────────────────
 
-  const pageBookmarkIndex = paragraphs[0]?.index ?? pageStart
+  const pageBookmarkIndex = paragraphs[0]?.index ?? pageStart.para
   const pageBookmark = bookmarks.find(b => paragraphs.some(p => p.index === b.index))
 
   async function handleAddBookmark(index, note) {
@@ -503,7 +543,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   }
 
   function openBookmarkModal() {
-    const index = paragraphs[0]?.index ?? pageStart
+    const index = paragraphs[0]?.index ?? pageStart.para
     const existing = bookmarks.find(b => b.index === index)
     setBookmarkModal({ index, existing: existing || null })
     setShowOverlay(false)
@@ -511,10 +551,10 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   function navigateToBookmark(index) {
     setShowBookmarkList(false)
-    if (index === pageStart) return   // already on this page
+    if (index === pageStart.para && pageStart.offset === 0) return   // already on this page
     setHistory(h => [...h.slice(-99), pageStart])
     setParagraphs([])
-    setPageStart(index)
+    setPageStart({ para: index, offset: 0 })
   }
 
   // Paragraph text lookup for bookmark list preview
@@ -522,8 +562,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Progress ──────────────────────────────────────────────────────────────
   const total      = paragraphs[0]?.total ?? project.total ?? 1
-  const lastIdx    = nextStart !== null ? nextStart - 1 : pageStart + visibleParagraphs.length - 1
-  const percent    = total > 0 ? Math.round(((pageStart + 1) / total) * 100) : 0
+  // If nextStart has offset>0 the split paragraph spans both pages; include it in lastIdx.
+  const lastIdx    = nextStart !== null
+    ? (nextStart.offset > 0 ? nextStart.para : nextStart.para - 1)
+    : pageStart.para + visibleParagraphs.length - 1
+  const percent    = total > 0 ? Math.round(((pageStart.para + 1) / total) * 100) : 0
   const transPct   = project.total > 0 ? Math.round((translatedCount / project.total) * 100) : 0
   const isDirect   = project.sourceLang === project.targetLang
 
@@ -568,23 +611,29 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           onMouseUp={handleTextSelection}
         >
           <div className="reader-text-clip" key={fadeKey} ref={clipRef}>
-            {/* Subtle chapter separator when this page opens a new chapter
-                (but not at the very start of the book, index 0) */}
-            {paragraphs[0]?.chapterStart && paragraphs[0]?.index > 0 && (
+            {/* Chapter separator — only at the start of a paragraph, not mid-split */}
+            {paragraphs[0]?.chapterStart && paragraphs[0]?.index > 0 && pageStart.offset === 0 && (
               <div className="chapter-separator" />
             )}
-            {visibleParagraphs.map((p, i) => (
-              <p
-                key={p.index}
-                ref={el => { paraRefs.current[i] = el }}
-                className={`reader-text ${isRtl ? 'rtl' : ''} ${!p.text ? 'empty' : ''}`}
-                style={{ fontSize: `${fontSize}px`, visibility: i < fittingCount ? 'visible' : 'hidden' }}
-              >
-                {translatingSet.has(p.index)
-                  ? <span className="spinner" style={{ margin: '6px 0', display: 'inline-block' }} />
-                  : (p.text || (isSource ? 'No content' : 'Translating…'))}
-              </p>
-            ))}
+            {visibleParagraphs.map((p, i) => {
+              // The first paragraph on a page may start mid-text when a long paragraph
+              // was split across pages. Slice to the stored character offset.
+              const displayText = i === 0 && pageStart.offset > 0 && p.text
+                ? p.text.slice(pageStart.offset)
+                : p.text
+              return (
+                <p
+                  key={p.index}
+                  ref={el => { paraRefs.current[i] = el }}
+                  className={`reader-text ${isRtl ? 'rtl' : ''} ${!displayText ? 'empty' : ''}`}
+                  style={{ fontSize: `${fontSize}px`, visibility: i < fittingCount ? 'visible' : 'hidden' }}
+                >
+                  {translatingSet.has(p.index)
+                    ? <span className="spinner" style={{ margin: '6px 0', display: 'inline-block' }} />
+                    : (displayText || (isSource ? 'No content' : 'Translating…'))}
+                </p>
+              )
+            })}
           </div>
         </div>
 
@@ -610,7 +659,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
         {/* Persistent progress — always visible at bottom-right */}
         <div className="reader-progress-label">
-          ¶{pageStart + 1}–{lastIdx + 1} / {total}
+          ¶{pageStart.para + 1}–{lastIdx + 1} / {total}
           {isDirect ? ` · ${percent}%` : ` · 📖${percent}% 🔤${transPct}%`}
         </div>
 

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dtylman/saatool/actions"
 	"github.com/dtylman/saatool/ai"
@@ -191,12 +192,19 @@ func (a *App) setupTranslatorLocked(projectPath string, p *translation.Project) 
 		log.Printf("could not create translator for %s: %v", projectPath, err)
 		return
 	}
+	var saveCount int32
 	t.OnTranslationComplete = func(index int, text string) {
 		runtime.EventsEmit(a.ctx, "translation:complete", TranslationEvent{
 			ProjectPath: projectPath,
 			Index:       index,
 			Text:        text,
 		})
+		// Auto-save every 5 translated paragraphs so progress survives a crash.
+		if atomic.AddInt32(&saveCount, 1)%5 == 0 {
+			if _, err := p.Save(); err != nil {
+				log.Printf("auto-save error for %s: %v", projectPath, err)
+			}
+		}
 	}
 	a.translators[projectPath] = t
 }

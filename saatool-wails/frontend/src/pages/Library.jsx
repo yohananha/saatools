@@ -437,6 +437,11 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
         >ℹ</button>
         <button
           className="book-action-btn"
+          title="Export / back up"
+          onClick={e => { e.stopPropagation(); onExport(info) }}
+        >⬇</button>
+        <button
+          className="book-action-btn"
           title="Delete"
           style={{ background: 'rgba(200,50,50,.7)' }}
           onClick={e => { e.stopPropagation(); onDelete(info) }}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react'
 import {
   GetParagraphsBatch, TranslateParagraphs,
   FixTranslation, SavePosition, GetLastPosition, SaveProject,
@@ -68,6 +68,7 @@ function BookmarkAddModal({ index, existing, onSave, onDelete, onClose }) {
           <textarea
             className="form-input form-textarea"
             rows={3}
+            maxLength={1000}
             value={note}
             onChange={e => setNote(e.target.value)}
             placeholder="Add a note…"
@@ -170,12 +171,25 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const [showOverlay,    setShowOverlay]    = useState(false)
   const [showFontPanel,  setShowFontPanel]  = useState(false)
   const [fittingCount,   setFittingCount]   = useState(BATCH)    // how many paras fully fit on page
-  const [keepScreenOn,   setKeepScreenOn]   = useState(() => localStorage.getItem('keepScreenOn') !== 'false')
+  const [keepScreenOn,   setKeepScreenOn]   = useState(() => localStorage.getItem('babelreader.keepScreenOn') !== 'false')
   const [showExportReminder, setShowExportReminder] = useState(false)
   const [bookDone,       setBookDone]       = useState(
     () => (project.total ?? 0) > 0 && (project.translated ?? 0) >= (project.total ?? 0)
   )
+  // translatedInSession is a ref (not state) so the onTranslated closure always
+  // reads the latest count without going stale — it isn't in the effect dep array.
+  // translatedCount is state so React re-renders the progress bar on each increment.
+  // Both are needed: ref for the synchronous completion check, state for the UI.
   const translatedInSession = useRef(0)
+  const [translatedCount,   setTranslatedCount]   = useState(project.translated ?? 0)
+
+  // Stable localStorage key for the "export reminder shown" flag.
+  // encodeURIComponent is used instead of btoa — btoa throws on non-Latin1 chars
+  // (e.g. Chinese / Cyrillic file paths), while encodeURIComponent handles all Unicode.
+  const exportReminderKey = useMemo(
+    () => `exportReminded_${encodeURIComponent(project.path)}`,
+    [project.path],
+  )
 
   // ── Glossary state ────────────────────────────────────────────────────────
   const [glossary,        setGlossary]        = useState({})
@@ -192,6 +206,15 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const overlayTimer = useRef(null)
   const clipRef      = useRef(null)   // .reader-text-clip (the overflow boundary)
   const paraRefs     = useRef([])     // one DOM ref per rendered paragraph
+
+  // ── Reset per-project counters when the project changes ─────────────────
+  // If the same Reader instance is reused for a different project (e.g. back/forward
+  // navigation in Wails), translatedInSession and translatedCount must reset so the
+  // completion check and progress bar start from the new project's baseline.
+  useEffect(() => {
+    translatedInSession.current = 0
+    setTranslatedCount(project.translated ?? 0)
+  }, [project.path, project.translated])
 
   // ── Load last saved position on mount ───────────────────────────────────
   useEffect(() => {
@@ -281,19 +304,18 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
       setTranslatingSet(s => { const n = new Set(s); n.delete(ev.index); return n })
       // Check if the entire book is now fully translated
       translatedInSession.current += 1
+      setTranslatedCount(c => c + 1)
       const bookTotal = project.total ?? 0
-      const alreadyTranslated = project.translated ?? 0
-      const reminderKey = `exportReminded_${project.path}`
-      if (bookTotal > 0 && alreadyTranslated + translatedInSession.current >= bookTotal) {
+      if (bookTotal > 0 && translatedInSession.current + (project.translated ?? 0) >= bookTotal) {
         setBookDone(true)
-        if (!localStorage.getItem(reminderKey)) {
-          localStorage.setItem(reminderKey, 'true')
+        if (!localStorage.getItem(exportReminderKey)) {
+          localStorage.setItem(exportReminderKey, 'true')
           setShowExportReminder(true)
         }
       }
     }
     return onTranslationComplete(onTranslated)
-  }, [project.path, project.total, project.translated])
+  }, [project.path, project.total, project.translated, exportReminderKey])
 
   // ── Trigger translation when viewing target mode ─────────────────────────
   useEffect(() => {
@@ -320,7 +342,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Sync keep-screen-on with Android bridge ───────────────────────────────
   useEffect(() => {
     window.AndroidBridge?.setKeepScreenOn(keepScreenOn)
-    localStorage.setItem('keepScreenOn', String(keepScreenOn))
+    localStorage.setItem('babelreader.keepScreenOn', String(keepScreenOn))
   }, [keepScreenOn])
 
   // ── Overlay auto-hide ────────────────────────────────────────────────────
@@ -347,7 +369,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   function navigate(delta) {
     if (delta > 0) {
       if (nextStart === null) return   // already on last page
-      setHistory(h => [...h, pageStart])
+      setHistory(h => [...h.slice(-99), pageStart])
       setParagraphs([])
       setPageStart(nextStart)
     } else {
@@ -490,7 +512,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   function navigateToBookmark(index) {
     setShowBookmarkList(false)
     if (index === pageStart) return   // already on this page
-    setHistory(h => [...h, pageStart])
+    setHistory(h => [...h.slice(-99), pageStart])
     setParagraphs([])
     setPageStart(index)
   }
@@ -502,7 +524,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const total      = paragraphs[0]?.total ?? project.total ?? 1
   const lastIdx    = nextStart !== null ? nextStart - 1 : pageStart + visibleParagraphs.length - 1
   const percent    = total > 0 ? Math.round(((pageStart + 1) / total) * 100) : 0
-  const transPct   = project.total > 0 ? Math.round((project.translated / project.total) * 100) : 0
+  const transPct   = project.total > 0 ? Math.round((translatedCount / project.total) * 100) : 0
   const isDirect   = project.sourceLang === project.targetLang
 
   return (

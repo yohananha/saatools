@@ -69,15 +69,48 @@ var upgrader = websocket.Upgrader{
 	// This prevents cross-origin attacks from malicious web pages while still
 	// allowing the embedded Android WebView (http://127.0.0.1:<port>) to connect.
 	// Non-browser clients (no Origin header) are also allowed.
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // not a browser cross-origin request
+	CheckOrigin: isLocalhostOrigin,
+}
+
+// isLocalhostOrigin returns true when the request comes from a localhost origin
+// or has no Origin header (non-browser client). Used by both the WebSocket
+// upgrader and the localhostOnly HTTP middleware.
+func isLocalhostOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // not a browser cross-origin request
+	}
+	return strings.HasPrefix(origin, "http://127.0.0.1:") ||
+		strings.HasPrefix(origin, "http://localhost:") ||
+		origin == "file://" // Wails desktop WebView
+}
+
+// localhostOnly is an HTTP middleware that rejects requests whose Origin header
+// points to a non-localhost source. This prevents cross-site request forgery
+// from a malicious page trying to reach the local API server.
+// Requests without an Origin header (curl, Wails IPC) are always allowed.
+func localhostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalhostOrigin(r) {
+			http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
+			return
 		}
-		return strings.HasPrefix(origin, "http://127.0.0.1:") ||
-			strings.HasPrefix(origin, "http://localhost:") ||
-			origin == "file://" // Wails desktop WebView
-	},
+		next.ServeHTTP(w, r)
+	})
+}
+
+// securityHeaders adds defensive HTTP response headers.
+// The app is served only to localhost, so headers like HSTS are omitted.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -120,7 +153,12 @@ func New(port int, filesDir string) (*Server, error) {
 
 	s.http = &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
-		Handler: mux,
+		Handler: securityHeaders(localhostOnly(mux)), // C-3 + L-3: CSRF + security headers
+		// H-2: Prevent goroutine/connection leaks from stalled clients.
+		// WriteTimeout is generous (5 min) to allow large project exports to stream.
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 5 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 	return s, nil
 }
@@ -207,6 +245,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws upgrade error: %v", err)
 		return
 	}
+	// H-6: Cap incoming message size. Clients only send pings; 4 KB is generous.
+	conn.SetReadLimit(4096)
 	s.hub.add(conn)
 	// Read loop — keep connection alive; remove on close.
 	go func() {

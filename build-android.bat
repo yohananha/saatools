@@ -9,13 +9,14 @@ REM         go install golang.org/x/mobile/cmd/gomobile@latest
 REM         gomobile init
 REM    3. Add %GOPATH%\bin and Android SDK\build-tools\<ver> to PATH
 REM
-REM  Usage:  build-android.bat [debug|release]   (default: debug)
+REM  Usage:  build-android.bat [debug|release|both]   (default: both)
+REM          both  — builds debug first, then release (default behaviour)
 REM ──────────────────────────────────────────────────────────────────────────────
 
 setlocal enabledelayedexpansion
 
 set BUILD_TYPE=%1
-if "%BUILD_TYPE%"=="" set BUILD_TYPE=debug
+if "%BUILD_TYPE%"=="" set BUILD_TYPE=both
 
 set REPO_ROOT=%~dp0
 set FRONTEND_DIR=%REPO_ROOT%saatool-wails\frontend
@@ -52,7 +53,7 @@ if errorlevel 1 ( echo [ERROR] gomobile bind failed & exit /b 1 )
 
 echo.
 echo ============================================================
-echo  Step 4: Build Android APK (%BUILD_TYPE%)
+echo  Step 4: Build Android APK(s)  [%BUILD_TYPE%]
 echo ============================================================
 cd /d "%ANDROID_DIR%"
 
@@ -71,24 +72,26 @@ if not exist "gradlew.bat" (
     if errorlevel 1 ( echo [ERROR] gradle wrapper generation failed & exit /b 1 )
 )
 
-if /i "%BUILD_TYPE%"=="release" (
-    call gradlew.bat assembleRelease
-    echo.
-    echo APK: %ANDROID_DIR%\app\build\outputs\apk\release\app-release-unsigned.apk
-) else (
+REM Always build release. Optionally also build debug.
+if /i NOT "%BUILD_TYPE%"=="release" (
+    echo [debug] Running assembleDebug...
     call gradlew.bat assembleDebug
+    if errorlevel 1 ( echo [ERROR] Gradle assembleDebug failed & exit /b 1 )
+    echo  Debug APK:   %ANDROID_DIR%\app\build\outputs\apk\debug\app-debug.apk
     echo.
-    echo APK: %ANDROID_DIR%\app\build\outputs\apk\debug\app-debug.apk
 )
-if errorlevel 1 ( echo [ERROR] Gradle build failed & exit /b 1 )
+
+echo [release] Running assembleRelease...
+call gradlew.bat assembleRelease
+if errorlevel 1 ( echo [ERROR] Gradle assembleRelease failed & exit /b 1 )
+echo  Release APK: %ANDROID_DIR%\app\build\outputs\apk\release\app-release.apk
 
 echo.
 echo ============================================================
 echo  Build complete!
 echo ============================================================
 echo  Install on connected device:
-if /i "%BUILD_TYPE%"=="release" (
-    echo    adb install app\build\outputs\apk\release\app-release-unsigned.apk
-) else (
-    echo    adb install app\build\outputs\apk\debug\app-debug.apk
+if /i NOT "%BUILD_TYPE%"=="release" (
+    echo    adb install -r app\build\outputs\apk\debug\app-debug.apk
 )
+echo    adb install -r app\build\outputs\apk\release\app-release.apk

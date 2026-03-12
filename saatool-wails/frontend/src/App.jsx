@@ -3,6 +3,7 @@ import { GetSettings, SaveSettings } from './api'
 import Library from './pages/Library'
 import Reader  from './pages/Reader'
 import Settings from './pages/Settings'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // ── Toast system ──────────────────────────────────────────────────────────
 let _addToast = null
@@ -79,7 +80,9 @@ export default function App() {
   if (page === 'reader' && project) {
     return (
       <div className="app-shell" data-theme={theme}>
-        <Reader project={project} onBack={closeReader} theme={theme} onToggleTheme={toggleTheme} />
+        <ErrorBoundary>
+          <Reader project={project} onBack={closeReader} theme={theme} onToggleTheme={toggleTheme} />
+        </ErrorBoundary>
         <ToastContainer />
       </div>
     )
@@ -88,8 +91,8 @@ export default function App() {
   return (
     <div className="app-shell" data-theme={theme}>
       <div className="app-content">
-        {page === 'library'  && <Library  onOpenReader={openReader} />}
-        {page === 'settings' && <Settings theme={theme} onThemeChange={setTheme} onNavigateTo={setPage} />}
+        {page === 'library'  && <ErrorBoundary><Library  onOpenReader={openReader} /></ErrorBoundary>}
+        {page === 'settings' && <ErrorBoundary><Settings theme={theme} onThemeChange={setTheme} onNavigateTo={setPage} /></ErrorBoundary>}
       </div>
 
       <nav className="bottom-nav">

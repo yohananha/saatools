@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Restrict cleartext (HTTP) traffic to 127.0.0.1 only.
+  The embedded Go server runs on http://127.0.0.1:<port> and the WebView
+  connects to it over localhost. All other hosts (e.g. DeepSeek API) must
+  use HTTPS. This replaces the broad android:usesCleartextTraffic="true"
+  flag that previously allowed HTTP to any host.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -205,6 +206,23 @@ func (s *Server) handleImportEPUB(w http.ResponseWriter, r *http.Request) {
 	targetLang := r.FormValue("targetLang")
 	direct := r.FormValue("direct") == "true"
 
+	// H-7: Reject implausibly long language strings before they reach AI prompts.
+	const maxLangLen = 50
+	if len(sourceLang) > maxLangLen || len(targetLang) > maxLangLen {
+		writeErr(w, fmt.Errorf("language field too long (max %d chars)", maxLangLen), http.StatusBadRequest)
+		return
+	}
+
+	// L-8: Verify ZIP magic bytes (PK\x03\x04) before writing to disk.
+	// EPUBs and SPZs are ZIP archives; an early content check rejects non-ZIP uploads.
+	var magic [4]byte
+	if _, err := io.ReadFull(file, magic[:]); err != nil || magic != [4]byte{0x50, 0x4B, 0x03, 0x04} {
+		writeErr(w, fmt.Errorf("uploaded file is not a valid ZIP/EPUB archive"), http.StatusBadRequest)
+		return
+	}
+	// Restore the consumed bytes so the full file is written to disk.
+	fileWithMagic := io.MultiReader(bytes.NewReader(magic[:]), file)
+
 	// Save to temp file preserving .epub extension
 	tmp, err := os.CreateTemp(appTempDir(), "import-*"+filepath.Ext(header.Filename))
 	if err != nil {
@@ -214,7 +232,9 @@ func (s *Server) handleImportEPUB(w http.ResponseWriter, r *http.Request) {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, file); err != nil {
+	// H-3: Cap the copy at the same 64 MB limit as ParseMultipartForm so a
+	// crafted body cannot exhaust disk space via a large trailing payload.
+	if _, err := io.Copy(tmp, io.LimitReader(fileWithMagic, 64<<20)); err != nil {
 		tmp.Close()
 		writeErr(w, fmt.Errorf("could not write temp file: %w", err), http.StatusInternalServerError)
 		return
@@ -247,6 +267,14 @@ func (s *Server) handleImportSPZ(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// L-8: SPZ files are ZIP archives — verify magic bytes before writing to disk.
+	var spzMagic [4]byte
+	if _, err := io.ReadFull(file, spzMagic[:]); err != nil || spzMagic != [4]byte{0x50, 0x4B, 0x03, 0x04} {
+		writeErr(w, fmt.Errorf("uploaded file is not a valid ZIP/SPZ archive"), http.StatusBadRequest)
+		return
+	}
+	spzWithMagic := io.MultiReader(bytes.NewReader(spzMagic[:]), file)
+
 	tmp, err := os.CreateTemp(appTempDir(), "import-*"+filepath.Ext(header.Filename))
 	if err != nil {
 		writeErr(w, fmt.Errorf("could not create temp file: %w", err), http.StatusInternalServerError)
@@ -255,7 +283,8 @@ func (s *Server) handleImportSPZ(w http.ResponseWriter, r *http.Request) {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, file); err != nil {
+	// H-3: Cap the copy at 64 MB to prevent disk exhaustion.
+	if _, err := io.Copy(tmp, io.LimitReader(spzWithMagic, 64<<20)); err != nil {
 		tmp.Close()
 		writeErr(w, err, http.StatusInternalServerError)
 		return
@@ -432,6 +461,10 @@ func (s *Server) handleFixTranslation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if body.Index < 0 {
+		writeErr(w, fmt.Errorf("index cannot be negative"), http.StatusBadRequest)
+		return
+	}
 	if err := s.app.FixTranslation(body.Path, body.Index); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
@@ -468,6 +501,30 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		if err := validateProjectPath(body.Path); err != nil {
 			writeErr(w, err, http.StatusBadRequest)
 			return
+		}
+		const maxFieldLen = 1000
+		if len(body.Title) > maxFieldLen || len(body.Author) > maxFieldLen ||
+			len(body.Genre) > maxFieldLen || len(body.WritingStyle) > maxFieldLen {
+			writeErr(w, fmt.Errorf("field too long (max %d chars)", maxFieldLen), http.StatusBadRequest)
+			return
+		}
+		const maxSynopsisLen = 10000
+		if len(body.Synopsis) > maxSynopsisLen {
+			writeErr(w, fmt.Errorf("synopsis too long (max %d chars)", maxSynopsisLen), http.StatusBadRequest)
+			return
+		}
+		const maxCharacters = 50
+		const maxCharFieldLen = 500
+		if len(body.Characters) > maxCharacters {
+			writeErr(w, fmt.Errorf("characters list exceeds limit of %d", maxCharacters), http.StatusBadRequest)
+			return
+		}
+		for _, c := range body.Characters {
+			if len(c.Name) > maxCharFieldLen || len(c.Description) > maxCharFieldLen ||
+				len(c.Role) > maxCharFieldLen || len(c.Gender) > maxCharFieldLen {
+				writeErr(w, fmt.Errorf("character field exceeds maximum length of %d chars", maxCharFieldLen), http.StatusBadRequest)
+				return
+			}
 		}
 		if err := s.app.SaveBookDetailsInfo(body.Path, body.BookDetailsInfo); err != nil {
 			writeErr(w, err, http.StatusInternalServerError)

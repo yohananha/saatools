@@ -134,7 +134,7 @@ func projectToInfo(projectPath string, p *translation.Project) ProjectInfo {
 		Total:        len(p.Source.Paragraphs),
 		Translated:   translated,
 		ReadAt:       p.LastParagraphIndex,
-		Direct:       p.Source.Language == p.Target.Language,
+		Direct:       p.Direct,
 	}
 }
 
@@ -188,9 +188,24 @@ func (a *App) setupTranslatorLocked(projectPath string, p *translation.Project) 
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
+// maskAPIKey replaces all but the last 4 characters of an API key with '*'.
+// This allows the frontend to confirm a key is set without exposing the full value.
+// NOTE: identical copy exists in saatool-wails/app.go — keep in sync.
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 4 {
+		return strings.Repeat("*", len(key))
+	}
+	return strings.Repeat("*", len(key)-4) + key[len(key)-4:]
+}
+
 func (a *App) GetSettings() Settings {
 	return Settings{
-		DeepSeekAPIKey:     config.Options.DeepSeekAPIKey,
+		// C-1: Return a masked key so the full value is never exposed in the
+		// API response. SaveSettings ignores submitted values that contain '*'.
+		DeepSeekAPIKey:     maskAPIKey(config.Options.DeepSeekAPIKey),
 		TranslateAhead:     config.Options.TranslateAhead,
 		AppSize:            config.Options.AppSize,
 		TranslationDocSize: config.Options.TranslationDocSize,
@@ -217,15 +232,24 @@ func (a *App) SaveSettings(s Settings) error {
 	if s.FixModel != "" && s.FixModel != "deepseek-chat" && s.FixModel != "deepseek-reasoner" {
 		return fmt.Errorf("fixModel must be \"deepseek-chat\" or \"deepseek-reasoner\"")
 	}
-	config.Options.DeepSeekAPIKey = s.DeepSeekAPIKey
+	const maxSavedLangLen = 100
+	if len(s.SourceLanguage) > maxSavedLangLen || len(s.TargetLanguage) > maxSavedLangLen {
+		return fmt.Errorf("language field too long (max %d chars)", maxSavedLangLen)
+	}
+	// C-1: Only update the API key when the submitted value is not the masked
+	// placeholder (i.e. the user actually typed a new key). A value containing
+	// '*' is treated as "keep existing".
+	if s.DeepSeekAPIKey != "" && !strings.Contains(s.DeepSeekAPIKey, "*") {
+		config.Options.DeepSeekAPIKey = s.DeepSeekAPIKey
+	}
 	config.Options.TranslateAhead = s.TranslateAhead
 	config.Options.AppSize = s.AppSize
 	config.Options.TranslationDocSize = s.TranslationDocSize
 	config.Options.AutoProofread = s.AutoProofread
-	config.Options.SourceLanguage = s.SourceLanguage
-	config.Options.TargetLanguage = s.TargetLanguage
+	config.Options.SourceLanguage = strings.TrimSpace(s.SourceLanguage)
+	config.Options.TargetLanguage = strings.TrimSpace(s.TargetLanguage)
 	config.Options.DarkMode = s.DarkMode
-	config.Options.FixModel = s.FixModel
+	config.Options.FixModel = strings.TrimSpace(s.FixModel)
 	return config.SaveOptions()
 }
 
@@ -486,7 +510,12 @@ func (a *App) FixTranslation(projectPath string, index int) error {
 		t = a.translators[projectPath]
 		a.mu.Unlock()
 	}
+	// H-4: Run Fix through the shared semaphore so it competes for API slots
+	// with background translation, preventing unbounded goroutine accumulation
+	// when the user taps Fix rapidly.
+	a.translationSem <- struct{}{}
 	go func() {
+		defer func() { <-a.translationSem }()
 		if err := t.FixTranslation(a.ctx, index); err != nil {
 			log.Printf("fix translation error at %d: %v", index, err)
 		}
@@ -759,8 +788,14 @@ func extractCoverFromEPUB(epubPath string) ([]byte, string) {
 	}
 	defer r.Close()
 
+	// findZip finds a zip entry by normalised path.
+	// NOTE: identical closure exists in saatool-wails/app.go — keep in sync.
 	findZip := func(name string) *zip.File {
 		name = path.Clean(name)
+		// Reject path-traversal attempts (e.g. "../../etc/passwd")
+		if strings.HasPrefix(name, "../") || name == ".." {
+			return nil
+		}
 		for _, f := range r.File {
 			if path.Clean(f.Name) == name {
 				return f

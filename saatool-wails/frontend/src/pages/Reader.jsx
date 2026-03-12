@@ -13,10 +13,9 @@ const langCode = lang => (lang || '?').slice(0, 2).toUpperCase()
 const MIN_FONT      = 12
 const MAX_FONT      = 36
 const OVERLAY_HIDE  = 4000
-const BATCH         = 30   // max paragraphs fetched per page
+const BATCH         = 30
 
 // ── GlossaryModal ─────────────────────────────────────────────────────────────
-// Used for both adding a new entry (termEditable=true) and editing an existing one.
 function GlossaryModal({ term: initTerm, initial, termEditable, onSave, onDelete, onClose }) {
   const [term,   setTerm]   = useState(initTerm)
   const [target, setTarget] = useState(initial)
@@ -51,7 +50,6 @@ function GlossaryModal({ term: initTerm, initial, termEditable, onSave, onDelete
     </div>
   )
 }
-
 
 // ── BookmarkAddModal ───────────────────────────────────────────────────────────
 function BookmarkAddModal({ index, existing, onSave, onDelete, onClose }) {
@@ -156,40 +154,59 @@ function GlossaryListModal({ glossary, onAdd, onEdit, onClose }) {
   )
 }
 
+// ── Returns character offset within `el` at viewport y coordinate ─────────────
+// Uses caretRangeFromPoint (Chrome/WebView) with caretPositionFromPoint fallback.
+function caretOffsetAtY(el, y) {
+  const x = el.getBoundingClientRect().left + 4
+  if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(x, y - 1)
+    if (range?.startContainer?.nodeType === Node.TEXT_NODE && el.contains(range.startContainer))
+      return range.startOffset
+  } else if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y - 1)
+    if (pos && el.contains(pos.offsetNode)) return pos.offset
+  }
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function Reader({ project, onBack, theme, onToggleTheme }) {
-  // ── Page state ───────────────────────────────────────────────────────────
-  // pageStart / nextStart / history are {para, offset} objects where:
-  //   para   = paragraph index (matches GetParagraphsBatch API)
-  //   offset = character offset within that paragraph (0 = start of paragraph)
-  // This allows splitting a long paragraph across pages so text flows continuously.
-  const [pageStart,      setPageStart]      = useState({ para: 0, offset: 0 })
-  const [paragraphs,     setParagraphs]     = useState([])      // fetched batch
-  const [nextStart,      setNextStart]      = useState(null)    // {para,offset} of next page, null = last page
-  const [history,        setHistory]        = useState([])      // back-stack of {para,offset}
-  const [fadeKey,        setFadeKey]        = useState(0)       // incremented on each page load to replay fade-in
+
+  // ── Page position state ───────────────────────────────────────────────────
+  // {para, offset}: para = paragraph index; offset = char offset within that para.
+  // offset > 0 means this page starts mid-paragraph (continuous text flow).
+  const [pageStart,  setPageStart]  = useState({ para: 0, offset: 0 })
+  const [paragraphs, setParagraphs] = useState([])
+  const [nextStart,  setNextStart]  = useState(null)   // null = last page
+  const [history,    setHistory]    = useState([])
+  const [fadeKey,    setFadeKey]    = useState(0)
+
+  // Ref always pointing at current pageStart so layout effect can read it
+  // without being listed as a dependency (avoids stale-measurement cycle).
+  const pageStartRef = useRef(pageStart)
+  pageStartRef.current = pageStart
+
+  // Blocks navigation while a page fetch is in flight — set synchronously in
+  // navigate() so a double-tap in the same frame is rejected immediately.
+  const navigating = useRef(false)
 
   // ── UI state ─────────────────────────────────────────────────────────────
-  const [translatingSet, setTranslatingSet] = useState(new Set()) // para indices being translated
+  const [translatingSet, setTranslatingSet] = useState(new Set())
   const [isSource,       setIsSource]       = useState(true)
   const [fontSize,       setFontSize]       = useState(18)
   const [showOverlay,    setShowOverlay]    = useState(false)
   const [showFontPanel,  setShowFontPanel]  = useState(false)
-  const [fittingCount,   setFittingCount]   = useState(BATCH)    // how many paras fully fit on page
-  const [keepScreenOn,   setKeepScreenOn]   = useState(() => localStorage.getItem('babelreader.keepScreenOn') !== 'false')
+  const [fittingCount,   setFittingCount]   = useState(BATCH)
+  const [keepScreenOn,   setKeepScreenOn]   = useState(
+    () => localStorage.getItem('babelreader.keepScreenOn') !== 'false'
+  )
   const [showExportReminder, setShowExportReminder] = useState(false)
   const [bookDone,       setBookDone]       = useState(
     () => (project.total ?? 0) > 0 && (project.translated ?? 0) >= (project.total ?? 0)
   )
-  // translatedInSession is a ref (not state) so the onTranslated closure always
-  // reads the latest count without going stale — it isn't in the effect dep array.
-  // translatedCount is state so React re-renders the progress bar on each increment.
-  // Both are needed: ref for the synchronous completion check, state for the UI.
   const translatedInSession = useRef(0)
   const [translatedCount,   setTranslatedCount]   = useState(project.translated ?? 0)
 
-  // Stable localStorage key for the "export reminder shown" flag.
-  // encodeURIComponent is used instead of btoa — btoa throws on non-Latin1 chars
-  // (e.g. Chinese / Cyrillic file paths), while encodeURIComponent handles all Unicode.
   const exportReminderKey = useMemo(
     () => `exportReminded_${encodeURIComponent(project.path)}`,
     [project.path],
@@ -197,30 +214,27 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Glossary state ────────────────────────────────────────────────────────
   const [glossary,        setGlossary]        = useState({})
-  const [selectionPopup,  setSelectionPopup]  = useState(null) // {term, x, y} | null
-  const [glossaryModal,   setGlossaryModal]   = useState(null) // {term, initial, termEditable} | null
+  const [selectionPopup,  setSelectionPopup]  = useState(null)
+  const [glossaryModal,   setGlossaryModal]   = useState(null)
 
   // ── Bookmark state ────────────────────────────────────────────────────────
   const [bookmarks,        setBookmarks]        = useState([])
-  const [bookmarkModal,    setBookmarkModal]    = useState(null) // {index, existing} | null
+  const [bookmarkModal,    setBookmarkModal]    = useState(null)
   const [showBookmarkList, setShowBookmarkList] = useState(false)
   const [showGlossaryList, setShowGlossaryList] = useState(false)
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const overlayTimer = useRef(null)
-  const clipRef      = useRef(null)   // .reader-text-clip (the overflow boundary)
-  const paraRefs     = useRef([])     // one DOM ref per rendered paragraph
+  const clipRef      = useRef(null)
+  const paraRefs     = useRef([])
 
-  // ── Reset per-project counters when the project changes ─────────────────
-  // If the same Reader instance is reused for a different project (e.g. back/forward
-  // navigation in Wails), translatedInSession and translatedCount must reset so the
-  // completion check and progress bar start from the new project's baseline.
+  // ── Reset session counters when project changes ───────────────────────────
   useEffect(() => {
     translatedInSession.current = 0
     setTranslatedCount(project.translated ?? 0)
   }, [project.path, project.translated])
 
-  // ── Load last saved position on mount ───────────────────────────────────
+  // ── Load last saved position on mount ────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     GetLastPosition(project.path).then(pos => {
@@ -231,44 +245,45 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     return () => { cancelled = true }
   }, [project.path])
 
-  // ── Fetch batch whenever pageStart or isSource changes ──────────────────
+  // ── Fetch paragraph batch whenever page or view changes ──────────────────
+  // navigating.current is set true here and cleared in .finally() so that
+  // the navigation guard is active for the entire duration of the fetch,
+  // regardless of whether navigate() or a view-toggle triggered the fetch.
   useEffect(() => {
     let cancelled = false
+    navigating.current = true
     GetParagraphsBatch(project.path, pageStart.para, BATCH, isSource)
       .then(batch => {
         if (cancelled) return
         const items = batch || []
         setParagraphs(items)
         setFadeKey(k => k + 1)
-        // Mark empty target paragraphs as pending translation
-        if (!isSource) {
-          setTranslatingSet(new Set(items.filter(p => !p.text).map(p => p.index)))
-        } else {
-          setTranslatingSet(new Set())
-        }
+        setTranslatingSet(
+          !isSource ? new Set(items.filter(p => !p.text).map(p => p.index)) : new Set()
+        )
       })
       .catch(e => toast(`Could not load paragraphs: ${e}`, 'error'))
+      .finally(() => { if (!cancelled) navigating.current = false })
     return () => { cancelled = true }
-  }, [project.path, pageStart, isSource, toast])
+  }, [project.path, pageStart, isSource])
 
   // ── Chapter-aware visible slice ───────────────────────────────────────────
-  // Find the first chapter-start that is NOT at position 0 on this page.
-  // Paragraphs from that point belong to the next chapter and must not be
-  // rendered on the current page — even if they would fit visually.
-  const chapterCutoff = paragraphs.findIndex((p, i) => i > 0 && p.chapterStart)
-  const visibleParagraphs = chapterCutoff > 0
-    ? paragraphs.slice(0, chapterCutoff)
-    : paragraphs
+  // Stop at the first chapter boundary that is not at position 0 on this page.
+  const chapterCutoff    = paragraphs.findIndex((p, i) => i > 0 && p.chapterStart)
+  const visibleParagraphs = chapterCutoff > 0 ? paragraphs.slice(0, chapterCutoff) : paragraphs
 
-  // ── After-render: measure overflow and compute next page start ───────────
-  // For paragraphs that straddle the bottom of the clip zone, we use
-  // document.caretRangeFromPoint / caretPositionFromPoint to find the exact
-  // character where the text crosses the clip boundary, enabling true continuous
-  // text flow (a paragraph can be split across pages).
+  // ── Measure DOM after render; compute nextStart ───────────────────────────
+  // IMPORTANT: pageStart is NOT in the dep array — it is read via pageStartRef.
+  // Having it in deps caused the layout effect to run with stale (old-page)
+  // paragraphs whenever pageStart changed, always computing nextStart=null
+  // and breaking forward navigation.
   useLayoutEffect(() => {
-    // Default: chapter boundary (null if no boundary in this batch)
-    const defaultNext = chapterCutoff > 0
-      ? { para: pageStart.para + chapterCutoff, offset: 0 }
+    const ps = pageStartRef.current
+
+    // Chapter boundary: next page starts at the first para of the next chapter.
+    // Use paragraphs[chapterCutoff].index (absolute), not pageStart.para + offset.
+    const defaultNext = chapterCutoff > 0 && paragraphs[chapterCutoff]
+      ? { para: paragraphs[chapterCutoff].index, offset: 0 }
       : null
 
     if (!clipRef.current || visibleParagraphs.length === 0) {
@@ -284,40 +299,37 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
     let next    = defaultNext
     let fitting = visibleParagraphs.length
+
     for (let i = 0; i < visibleParagraphs.length; i++) {
       const el = paraRefs.current[i]
       if (!el) continue
-      const elBottom = el.getBoundingClientRect().bottom
-      if (elBottom <= clipBottom) continue
+      const rect = el.getBoundingClientRect()
+      if (rect.bottom <= clipBottom) continue   // fully visible — keep going
 
-      const elTop = el.getBoundingClientRect().top
-      if (elTop >= clipBottom) {
-        // Entire paragraph is below the fold — push it whole to the next page
-        next    = { para: visibleParagraphs[Math.max(0, i)].index, offset: 0 }
-        fitting = Math.max(1, i)
-        break
-      }
-
-      // Paragraph straddles the fold — find the character at the clip boundary
-      // so the overflow text continues on the next page instead of being lost.
-      const charOffset = caretOffsetAtY(el, clipBottom)
-      if (charOffset !== null && charOffset > 0) {
-        // charOffset is relative to the rendered text; add back the slice offset
-        // that was applied to the first paragraph on this page.
-        const absOffset = (i === 0 ? pageStart.offset : 0) + charOffset
-        next = { para: visibleParagraphs[i].index, offset: absOffset }
-      } else {
-        // Fallback: caret detection unavailable — push whole paragraph to next page
-        next = { para: visibleParagraphs[Math.max(0, i)].index, offset: 0 }
-      }
       fitting = Math.max(1, i)
+
+      if (rect.top >= clipBottom) {
+        // Whole paragraph below fold — push it entirely to next page
+        next = { para: visibleParagraphs[i].index, offset: 0 }
+      } else {
+        // Paragraph straddles fold — split at the character boundary
+        const charOffset = caretOffsetAtY(el, clipBottom)
+        if (charOffset !== null && charOffset > 0) {
+          // Add back the slice offset that was applied to the first paragraph
+          const baseOffset = i === 0 ? ps.offset : 0
+          next = { para: visibleParagraphs[i].index, offset: baseOffset + charOffset }
+        } else {
+          next = { para: visibleParagraphs[i].index, offset: 0 }
+        }
+      }
       break
     }
+
     setNextStart(next)
     setFittingCount(fitting)
-  }, [paragraphs, fontSize, pageStart])
+  }, [paragraphs, fontSize])   // ← only paragraphs/fontSize; pageStart via ref
 
-  // ── Listen for translation:complete events ───────────────────────────────
+  // ── Translation events ────────────────────────────────────────────────────
   useEffect(() => {
     function onTranslated(ev) {
       if (ev.projectPath !== project.path) return
@@ -325,7 +337,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         p.index === ev.index ? { ...p, text: ev.text } : p
       ))
       setTranslatingSet(s => { const n = new Set(s); n.delete(ev.index); return n })
-      // Check if the entire book is now fully translated
       translatedInSession.current += 1
       setTranslatedCount(c => c + 1)
       const bookTotal = project.total ?? 0
@@ -340,35 +351,34 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     return onTranslationComplete(onTranslated)
   }, [project.path, project.total, project.translated, exportReminderKey])
 
-  // ── Trigger translation when viewing target mode ─────────────────────────
+  // ── Trigger translation when switching to target view ────────────────────
   useEffect(() => {
     if (!isSource) {
       TranslateParagraphs(project.path, pageStart.para).catch(() => {})
     }
   }, [isSource, pageStart, project.path])
 
-  // ── Save position on every page/view change ──────────────────────────────
+  // ── Save position on page/view change ────────────────────────────────────
   useEffect(() => {
     SavePosition(project.path, pageStart.para, isSource).catch(() => {})
   }, [project.path, pageStart, isSource])
 
-  // ── Load glossary on project open ────────────────────────────────────────
+  // ── Load glossary and bookmarks on open ──────────────────────────────────
   useEffect(() => {
     GetGlossary(project.path).then(g => setGlossary(g || {})).catch(() => {})
   }, [project.path])
 
-  // ── Load bookmarks on project open ───────────────────────────────────────
   useEffect(() => {
     GetBookmarks(project.path).then(b => setBookmarks(b || [])).catch(() => {})
   }, [project.path])
 
-  // ── Sync keep-screen-on with Android bridge ───────────────────────────────
+  // ── Keep-screen-on ────────────────────────────────────────────────────────
   useEffect(() => {
     window.AndroidBridge?.setKeepScreenOn(keepScreenOn)
     localStorage.setItem('babelreader.keepScreenOn', String(keepScreenOn))
   }, [keepScreenOn])
 
-  // ── Overlay auto-hide ────────────────────────────────────────────────────
+  // ── Overlay ───────────────────────────────────────────────────────────────
   function showOverlayTemporarily() {
     clearTimeout(overlayTimer.current)
     setShowOverlay(true)
@@ -385,51 +395,34 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   }
   useEffect(() => () => clearTimeout(overlayTimer.current), [])
 
-  // ── RTL detection (based on first paragraph's direction) ─────────────────
-  const isRtl = paragraphs[0]?.direction === 'rtl'
-
-  // ── Character-level caret detection ──────────────────────────────────────
-  // Returns the character offset within `el`'s text content at viewport y=`y`.
-  // Uses caretRangeFromPoint (Chrome/WebView) with a caretPositionFromPoint fallback (Firefox).
-  function caretOffsetAtY(el, y) {
-    const x = el.getBoundingClientRect().left + 4
-    if (document.caretRangeFromPoint) {
-      const range = document.caretRangeFromPoint(x, y - 1)
-      if (range?.startContainer?.nodeType === Node.TEXT_NODE && el.contains(range.startContainer)) {
-        return range.startOffset
-      }
-    } else if (document.caretPositionFromPoint) {
-      const pos = document.caretPositionFromPoint(x, y - 1)
-      if (pos && el.contains(pos.offsetNode)) return pos.offset
-    }
-    return null
-  }
-
   // ── Navigation ────────────────────────────────────────────────────────────
+  // navigating.current is set synchronously so a second tap in the same frame
+  // (before React re-renders) is rejected immediately.
   function navigate(delta) {
+    if (navigating.current) return
+
     if (delta > 0) {
-      if (nextStart === null) return   // already on last page
+      if (!nextStart) return
+      navigating.current = true
       setHistory(h => [...h.slice(-99), pageStart])
-      setParagraphs([])
       setPageStart(nextStart)
     } else {
       if (history.length > 0) {
+        navigating.current = true
         const prev = history[history.length - 1]
         setHistory(h => h.slice(0, -1))
-        setParagraphs([])
         setPageStart(prev)
       } else if (pageStart.para > 0 || pageStart.offset > 0) {
-        // No history — jump back by one page worth of paragraphs
-        setParagraphs([])
-        setPageStart({ para: Math.max(0, pageStart.para - fittingCount), offset: 0 })
+        navigating.current = true
+        setPageStart({ para: Math.max(0, pageStart.para - Math.max(1, fittingCount)), offset: 0 })
       }
     }
   }
 
-  // ── Tap handler — RTL swaps left/right semantics ─────────────────────────
+  // ── Tap handler ───────────────────────────────────────────────────────────
+  const isRtl = paragraphs[0]?.direction === 'rtl'
+
   function handleTap(e) {
-    // If the user just finished selecting text, clear the selection and show the
-    // glossary popup instead of navigating.
     const sel = window.getSelection()
     if (sel && !sel.isCollapsed) {
       sel.removeAllRanges()
@@ -438,8 +431,8 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     }
     setSelectionPopup(null)
     const rect = e.currentTarget.getBoundingClientRect()
-    const x    = e.clientX - rect.left
-    const w    = rect.width
+    const x = e.clientX - rect.left
+    const w = rect.width
     if      (x < w * 0.28) isRtl ? navigate(+1) : navigate(-1)
     else if (x > w * 0.72) isRtl ? navigate(-1) : navigate(+1)
     else                   toggleOverlay()
@@ -451,8 +444,8 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     showOverlayTemporarily()
   }
 
-  // ── Fix translation (always targets first paragraph on page) ─────────────
-  const fixIndex     = paragraphs[0]?.index ?? 0
+  // ── Fix translation ───────────────────────────────────────────────────────
+  const fixIndex      = paragraphs[0]?.index ?? 0
   const isTranslating = translatingSet.size > 0
 
   async function handleFix() {
@@ -475,9 +468,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     }
   }
 
-  // ── Glossary ──────────────────────────────────────────────────────────────
-
-  // Called on mouseup inside the text container — shows popup if text selected.
+  // ── Text selection → glossary popup ──────────────────────────────────────
   function handleTextSelection() {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || !sel.rangeCount) { setSelectionPopup(null); return }
@@ -512,8 +503,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   }
 
   // ── Bookmarks ─────────────────────────────────────────────────────────────
-
-  const pageBookmarkIndex = paragraphs[0]?.index ?? pageStart.para
   const pageBookmark = bookmarks.find(b => paragraphs.some(p => p.index === b.index))
 
   async function handleAddBookmark(index, note) {
@@ -551,34 +540,30 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   function navigateToBookmark(index) {
     setShowBookmarkList(false)
-    if (index === pageStart.para && pageStart.offset === 0) return   // already on this page
+    if (index === pageStart.para && pageStart.offset === 0) return
     setHistory(h => [...h.slice(-99), pageStart])
-    setParagraphs([])
     setPageStart({ para: index, offset: 0 })
   }
 
-  // Paragraph text lookup for bookmark list preview
   const paragraphTexts = Object.fromEntries(paragraphs.map(p => [p.index, p.text]))
 
   // ── Progress ──────────────────────────────────────────────────────────────
-  const total      = paragraphs[0]?.total ?? project.total ?? 1
-  // If nextStart has offset>0 the split paragraph spans both pages; include it in lastIdx.
-  const lastIdx    = nextStart !== null
+  const total    = paragraphs[0]?.total ?? project.total ?? 1
+  const lastIdx  = nextStart !== null
     ? (nextStart.offset > 0 ? nextStart.para : nextStart.para - 1)
     : pageStart.para + visibleParagraphs.length - 1
-  const percent    = total > 0 ? Math.round(((pageStart.para + 1) / total) * 100) : 0
-  const transPct   = project.total > 0 ? Math.round((translatedCount / project.total) * 100) : 0
-  const isDirect   = project.sourceLang === project.targetLang
+  const percent  = total > 0 ? Math.round(((pageStart.para + 1) / total) * 100) : 0
+  const transPct = project.total > 0 ? Math.round((translatedCount / project.total) * 100) : 0
+  const isDirect = project.sourceLang === project.targetLang
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="reader-page">
 
       {/* ── Top bar ── */}
       <div className="reader-topbar">
         <button className="reader-back-btn" onClick={onBack}>✕</button>
-        <div className="reader-title">
-          {project.title || project.name}
-        </div>
+        <div className="reader-title">{project.title || project.name}</div>
         {!isDirect && (
           <div className="reader-view-toggle">
             <button
@@ -599,25 +584,18 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
       {/* ── Tap area ── */}
       <div className="reader-tap-area" onClick={handleTap}>
 
-        {/* Direction hints flip for RTL */}
         <div className="reader-zone-hint left">{isRtl ? '›' : '‹'}</div>
         <div className="reader-zone-hint right">{isRtl ? '‹' : '›'}</div>
 
-        {/* Text container — padding provides symmetric top/bottom margin.
-            The inner .reader-text-clip div is where overflow:hidden lives,
-            so the clip line is always exactly at the padding boundary.     */}
         <div
           className={`reader-text-container${isRtl ? ' rtl' : ''}`}
           onMouseUp={handleTextSelection}
         >
           <div className="reader-text-clip" key={fadeKey} ref={clipRef}>
-            {/* Chapter separator — only at the start of a paragraph, not mid-split */}
             {paragraphs[0]?.chapterStart && paragraphs[0]?.index > 0 && pageStart.offset === 0 && (
               <div className="chapter-separator" />
             )}
             {visibleParagraphs.map((p, i) => {
-              // The first paragraph on a page may start mid-text when a long paragraph
-              // was split across pages. Slice to the stored character offset.
               const displayText = i === 0 && pageStart.offset > 0 && p.text
                 ? p.text.slice(pageStart.offset)
                 : p.text
@@ -626,7 +604,10 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
                   key={p.index}
                   ref={el => { paraRefs.current[i] = el }}
                   className={`reader-text ${isRtl ? 'rtl' : ''} ${!displayText ? 'empty' : ''}`}
-                  style={{ fontSize: `${fontSize}px`, visibility: i < fittingCount ? 'visible' : 'hidden' }}
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    visibility: i < fittingCount ? 'visible' : 'hidden',
+                  }}
                 >
                   {translatingSet.has(p.index)
                     ? <span className="spinner" style={{ margin: '6px 0', display: 'inline-block' }} />
@@ -637,27 +618,18 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           </div>
         </div>
 
-        {/* Progress bars — read (top) + translated (bottom, translated books only) */}
+        {/* Progress bars */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-          {/* Reading progress */}
           <div style={{ height: 2, background: 'var(--border)' }}>
-            <div style={{
-              width: `${percent}%`, height: '100%',
-              background: '#4caf82', transition: 'width .4s ease',
-            }} />
+            <div style={{ width: `${percent}%`, height: '100%', background: '#4caf82', transition: 'width .4s ease' }} />
           </div>
-          {/* Translation progress */}
           {!isDirect && (
             <div style={{ height: 2, background: 'var(--border)' }}>
-              <div style={{
-                width: `${transPct}%`, height: '100%',
-                background: 'var(--accent)', transition: 'width .4s ease',
-              }} />
+              <div style={{ width: `${transPct}%`, height: '100%', background: 'var(--accent)', transition: 'width .4s ease' }} />
             </div>
           )}
         </div>
 
-        {/* Persistent progress — always visible at bottom-right */}
         <div className="reader-progress-label">
           ¶{pageStart.para + 1}–{lastIdx + 1} / {total}
           {isDirect ? ` · ${percent}%` : ` · 📖${percent}% 🔤${transPct}%`}
@@ -666,7 +638,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         {/* Overlay */}
         {showOverlay && (
           <div className="reader-overlay" onClick={e => e.stopPropagation()}>
-            {/* Font controls: Aa taps open stacked A−/A+ in place */}
             <div className="overlay-font-ctrl">
               {showFontPanel ? (
                 <>
@@ -693,12 +664,14 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
                 🔖{pageBookmark ? ' ✓' : ''}
               </button>
               {bookmarks.length > 0 && (
-                <button className="btn overlay-btn" onClick={() => { setShowOverlay(false); setShowBookmarkList(true) }}
+                <button className="btn overlay-btn"
+                  onClick={() => { setShowOverlay(false); setShowBookmarkList(true) }}
                   title="All bookmarks">
                   📑 {bookmarks.length}
                 </button>
               )}
-              <button className="btn overlay-btn" onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
+              <button className="btn overlay-btn"
+                onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
                 title="Glossary">
                 📖{Object.keys(glossary).length > 0 ? ` ${Object.keys(glossary).length}` : ''}
               </button>
@@ -707,7 +680,8 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         )}
       </div>
 
-      {/* ── Selection → Glossary popup ── */}
+      {/* ── Modals ── */}
+
       {selectionPopup && (
         <div className="glossary-popup" style={{ left: selectionPopup.x, top: selectionPopup.y }}>
           <button className="btn" style={{ fontSize: 12, padding: '4px 10px', gap: 4 }}
@@ -717,7 +691,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         </div>
       )}
 
-      {/* ── Glossary entry modal ── */}
       {glossaryModal && (
         <GlossaryModal
           term={glossaryModal.term}
@@ -729,8 +702,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-
-{/* ── Bookmark add/edit modal ── */}
       {bookmarkModal && (
         <BookmarkAddModal
           index={bookmarkModal.index}
@@ -741,7 +712,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-      {/* ── Bookmark list modal ── */}
       {showBookmarkList && (
         <BookmarkListModal
           bookmarks={bookmarks}
@@ -753,7 +723,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-      {/* ── Glossary list modal ── */}
       {showGlossaryList && (
         <GlossaryListModal
           glossary={glossary}
@@ -763,7 +732,6 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         />
       )}
 
-      {/* ── Export reminder (only for translated books) ── */}
       {!isDirect && showExportReminder && (
         <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setShowExportReminder(false)}>
           <div className="modal" style={{ textAlign: 'center', gap: 16 }}>

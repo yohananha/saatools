@@ -477,15 +477,19 @@ func (a *App) GetLastPosition(projectPath string) (*Position, error) {
 	}, nil
 }
 
-// SavePosition stores the current reading position in the project (and saves to disk).
+// SavePosition stores the current reading position in the project.
+// Only updates the in-memory position — does NOT flush to disk here.
+// Calling p.Save() on every page turn holds p.mutex for a full gzip+JSON
+// write of the entire project, which stalls concurrent GetParagraphsBatch
+// calls. Position is already persisted by the auto-save in
+// OnTranslationComplete (every 5 paragraphs) and by the explicit Save.
 func (a *App) SavePosition(projectPath string, index int, sourceView bool) error {
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {
 		return err
 	}
 	p.SetPosition(sourceView, index)
-	_, err = p.Save()
-	return err
+	return nil
 }
 
 // TranslateParagraph triggers AI translation of a single paragraph.
@@ -542,27 +546,29 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 		end = len(p.Source.Paragraphs)
 	}
 
-	for i := fromIndex; i < end; i += translationBatchSize {
-		batchEnd := i + translationBatchSize
-		if batchEnd > end {
-			batchEnd = end
-		}
-		indices := make([]int, batchEnd-i)
-		for j := range indices {
-			indices[j] = i + j
-		}
-		// Block until a slot is free in the shared semaphore. Because the
-		// semaphore lives on the App (not per-call), concurrent invocations
-		// of TranslateParagraphs all compete for the same pool of slots,
-		// capping total concurrent API calls regardless of call frequency.
-		a.translationSem <- struct{}{}
-		go func(batch []int) {
-			defer func() { <-a.translationSem }()
-			if err := t.TranslateAndProofReadBatch(a.ctx, batch); err != nil {
-				log.Printf("batch translation error (%v): %v", batch, err)
+	// Launch the batch loop in a background goroutine so this function returns
+	// immediately. The semaphore send inside the loop can block while all
+	// translation slots are full — keeping that wait inside a Wails binding
+	// call would freeze the frontend's promise until a slot is free.
+	go func() {
+		for i := fromIndex; i < end; i += translationBatchSize {
+			batchEnd := i + translationBatchSize
+			if batchEnd > end {
+				batchEnd = end
 			}
-		}(indices)
-	}
+			indices := make([]int, batchEnd-i)
+			for j := range indices {
+				indices[j] = i + j
+			}
+			a.translationSem <- struct{}{}
+			go func(batch []int) {
+				defer func() { <-a.translationSem }()
+				if err := t.TranslateAndProofReadBatch(a.ctx, batch); err != nil {
+					log.Printf("batch translation error (%v): %v", batch, err)
+				}
+			}(indices)
+		}
+	}()
 	return nil
 }
 
@@ -581,8 +587,9 @@ func (a *App) FixTranslation(projectPath string, index int) error {
 	}
 	// H-4: Run Fix through the shared semaphore so it competes for API slots
 	// with background translation, preventing unbounded goroutine accumulation.
-	a.translationSem <- struct{}{}
+	// Semaphore send is inside a goroutine so the Wails call returns immediately.
 	go func() {
+		a.translationSem <- struct{}{}
 		defer func() { <-a.translationSem }()
 		if err := t.FixTranslation(a.ctx, index); err != nil {
 			log.Printf("fix translation error at %d: %v", index, err)

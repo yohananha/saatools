@@ -12,6 +12,9 @@ require (
 	fyne.io/fyne/v2 v2.6.3 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
 	github.com/emvi/iso-639-1 v1.1.1 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
+	github.com/go-shiori/go-epub v1.2.1 // indirect
+	github.com/gofrs/uuid/v5 v5.0.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
@@ -21,6 +24,7 @@ require (
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
 	github.com/taylorskalyo/goreader v1.0.1 // indirect
 	github.com/urfave/cli/v3 v3.4.1 // indirect
+	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect

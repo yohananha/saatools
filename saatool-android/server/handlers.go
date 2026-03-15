@@ -59,6 +59,69 @@ func queryBool(r *http.Request, key string) bool {
 
 // validateProjectPath returns an error if projectPath would escape the projects
 // directory. Prevents path-traversal attacks (../../etc/passwd, etc.).
+// sanitizeExportName returns a safe filename base (alphanumeric, spaces, hyphens only).
+func sanitizeExportName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(strings.ReplaceAll(b.String(), "  ", " "))
+}
+
+// exportBasename returns a suggested download base name from project (e.g. "Harry Potter he"). Empty if load fails.
+func (s *Server) exportBasename(projectPath string) string {
+	info, err := s.app.LoadProject(projectPath)
+	if err != nil {
+		return ""
+	}
+	base := sanitizeExportName(info.Title)
+	lang := strings.TrimSpace(info.TargetLang)
+	if lang != "" {
+		if base != "" {
+			base = base + " " + lang
+		} else {
+			base = lang
+		}
+	}
+	if base == "" {
+		base = filepath.Base(projectPath)
+		if ext := filepath.Ext(base); ext != "" {
+			base = base[:len(base)-len(ext)]
+		}
+		if base == "" {
+			base = "export"
+		}
+	}
+	return base
+}
+
+// exportEPUBFilename returns the EPUB download filename: "{bookName} - {author} - {targetLang} by Babel.epub". Falls back to exportBasename + ".epub" if load fails.
+func (s *Server) exportEPUBFilename(projectPath string) string {
+	info, err := s.app.LoadProject(projectPath)
+	if err != nil {
+		return s.exportBasename(projectPath) + ".epub"
+	}
+	title := sanitizeExportName(info.Title)
+	author := sanitizeExportName(info.Author)
+	lang := strings.TrimSpace(info.TargetLang)
+	if lang == "" {
+		lang = "export"
+	}
+	var base string
+	if title != "" && author != "" {
+		base = title + " - " + author + " - " + lang + " by Babel"
+	} else if title != "" {
+		base = title + " - " + lang + " by Babel"
+	} else if author != "" {
+		base = author + " - " + lang + " by Babel"
+	} else {
+		base = lang + " by Babel"
+	}
+	return base + ".epub"
+}
+
 func validateProjectPath(projectPath string) error {
 	if projectPath == "" {
 		return fmt.Errorf("project path is empty")
@@ -309,16 +372,99 @@ func (s *Server) handleExportProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, http.StatusBadRequest)
 		return
 	}
-
-	// Stream the project file directly to the browser as a download.
-	name := filepath.Base(projectPath)
+	var buf bytes.Buffer
+	if err := s.app.WriteProjectTo(projectPath, &buf); err != nil {
+		log.Printf("export error for %s: %v", projectPath, err)
+		writeErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	name := s.exportBasename(projectPath)
+	if name == "" {
+		name = filepath.Base(projectPath)
+		if name == "" {
+			name = "project"
+		} else if ext := filepath.Ext(name); ext != "" {
+			name = name[:len(name)-len(ext)]
+		}
+	}
+	if !strings.HasSuffix(name, ".spz") {
+		name = name + ".spz"
+	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = io.Copy(w, &buf)
+}
 
-	if err := s.app.WriteProjectTo(projectPath, w); err != nil {
-		// Headers already sent, so just log.
-		log.Printf("export error for %s: %v", projectPath, err)
+// handleExportEPUB exports the project as an EPUB. Accepts GET ?path=... or POST JSON {"path":"..."}.
+// Buffers the EPUB first so that on failure we can return an HTTP error instead of 200 with empty body.
+func (s *Server) handleExportEPUB(w http.ResponseWriter, r *http.Request) {
+	log.Printf("export-epub: request %s", r.Method)
+	var projectPath string
+	switch r.Method {
+	case http.MethodGet:
+		projectPath = queryStr(r, "path")
+	case http.MethodPost:
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := decodeBody(r, &body); err != nil {
+			log.Printf("export-epub: POST body invalid: %v", err)
+			writeErr(w, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+			return
+		}
+		projectPath = body.Path
+	default:
+		http.NotFound(w, r)
+		return
 	}
+	if err := validateProjectPath(projectPath); err != nil {
+		log.Printf("export-epub: path invalid: %v", err)
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	log.Printf("export-epub: building for %s", projectPath)
+	var buf bytes.Buffer
+	if err := s.app.WriteEPUBTo(projectPath, &buf); err != nil {
+		log.Printf("export-epub: error for %s: %v", projectPath, err)
+		writeErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	log.Printf("export-epub: ok for %s, %d bytes", projectPath, buf.Len())
+	filename := s.exportEPUBFilename(projectPath)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Type", "application/epub+zip")
+	_, _ = io.Copy(w, &buf)
+}
+
+func (s *Server) handleExportTXT(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	projectPath := queryStr(r, "path")
+	if err := validateProjectPath(projectPath); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	var buf bytes.Buffer
+	if err := s.app.WriteTranslationOnlyTo(projectPath, &buf); err != nil {
+		log.Printf("export txt error for %s: %v", projectPath, err)
+		writeErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	base := s.exportBasename(projectPath)
+	if base == "" {
+		base = filepath.Base(projectPath)
+		if ext := filepath.Ext(base); ext != "" {
+			base = base[:len(base)-len(ext)]
+		}
+		if base == "" {
+			base = "export"
+		}
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.txt"`, base))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = io.Copy(w, &buf)
 }
 
 func (s *Server) handleProjectCover(w http.ResponseWriter, r *http.Request) {
@@ -438,6 +584,51 @@ func (s *Server) handleTranslate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.app.TranslateParagraphs(body.Path, body.From); err != nil {
+		writeErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSetActiveProject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if body.Path != "" {
+		if err := validateProjectPath(body.Path); err != nil {
+			writeErr(w, err, http.StatusBadRequest)
+			return
+		}
+	}
+	s.app.SetActiveProject(body.Path)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleTranslateWholeBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := validateProjectPath(body.Path); err != nil {
+		writeErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := s.app.TranslateWholeBook(body.Path); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
 	}

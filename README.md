@@ -136,6 +136,7 @@ gradlew assembleRelease
 | **Dual progress bar** | Separate reading progress (green) and translation progress (accent) |
 | **Library filters** | Filter by status, author, genre, writing style; genre tags auto-merged |
 | **Book details** | AI-assisted fetch of author, genre, synopsis, characters |
+| **Export** | Export as EPUB (translation + metadata), as project (.spz), or translation-only (.txt). On Android, export shows a folder picker and saves the file to the chosen location (Downloads or app storage). |
 | **Dark / light mode** | Persistent theme toggle in nav bar |
 | **RTL support** | Right-to-left paragraph layout for Hebrew, Arabic, etc. |
 

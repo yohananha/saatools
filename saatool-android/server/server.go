@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dtylman/saatool/config"
+	"github.com/go-shiori/go-epub"
 	"github.com/gorilla/websocket"
 )
 
@@ -99,6 +100,17 @@ func localhostOnly(next http.Handler) http.Handler {
 	})
 }
 
+// requestLogging logs every request so in-app logs show API activity (e.g. export-epub).
+func requestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("req %s %s", r.Method, r.URL.Path)
+		if r.URL.RawQuery != "" && strings.HasPrefix(r.URL.Path, "/api/") {
+			log.Printf("  query: %s", r.URL.RawQuery)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // securityHeaders adds defensive HTTP response headers.
 // The app is served only to localhost, so headers like HSTS are omitted.
 func securityHeaders(next http.Handler) http.Handler {
@@ -123,17 +135,32 @@ type Server struct {
 }
 
 // New creates and configures a Server. Call ListenAndServe to start it.
-func New(port int, filesDir string) (*Server, error) {
+// defaultProjectsDir: if non-empty (e.g. Android Downloads path) and Options.ProjectsDirectory
+// is not yet set, it is set and persisted so first run uses an accessible folder.
+func New(port int, filesDir string, defaultProjectsDir string) (*Server, error) {
 	// Set data directory so config/fs.go resolves paths correctly.
 	if filesDir != "" {
 		if err := setFilesDir(filesDir); err != nil {
 			return nil, err
+		}
+		// On Android, go-epub defaults to os.TempDir() (/data/local/tmp, not writable).
+		// Use in-memory storage so EPUB export never touches the filesystem.
+		if err := epub.Use(epub.MemoryFS); err != nil {
+			log.Printf("epub.Use(MemoryFS) failed: %v", err)
 		}
 	}
 
 	// Load saved settings from disk (best effort).
 	if err := config.LoadOptions(); err != nil {
 		log.Printf("could not load options: %v", err)
+	}
+
+	// On first run with a default (e.g. Android), use it so projects go to Downloads.
+	if defaultProjectsDir != "" && config.Options.ProjectsDirectory == "" {
+		config.Options.ProjectsDirectory = defaultProjectsDir
+		if err := config.SaveOptions(); err != nil {
+			log.Printf("could not persist default projects dir: %v", err)
+		}
 	}
 
 	// Install mem-logger so GetLog() works.
@@ -153,7 +180,7 @@ func New(port int, filesDir string) (*Server, error) {
 
 	s.http = &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
-		Handler: securityHeaders(localhostOnly(mux)), // C-3 + L-3: CSRF + security headers
+		Handler: securityHeaders(localhostOnly(requestLogging(mux))), // C-3 + L-3 + request log
 		// H-2: Prevent goroutine/connection leaks from stalled clients.
 		// WriteTimeout is generous (5 min) to allow large project exports to stream.
 		ReadTimeout:  30 * time.Second,
@@ -194,12 +221,16 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/projects/import-epub", s.handleImportEPUB)
 	mux.HandleFunc("/api/projects/import-spz", s.handleImportSPZ)
 	mux.HandleFunc("/api/projects/export", s.handleExportProject)
+	mux.HandleFunc("/api/projects/export-epub", s.handleExportEPUB)
+	mux.HandleFunc("/api/projects/export-txt", s.handleExportTXT)
 	mux.HandleFunc("/api/projects/cover", s.handleProjectCover)
 
 	// Paragraphs
 	mux.HandleFunc("/api/paragraphs/batch", s.handleParagraphsBatch)
 	mux.HandleFunc("/api/paragraphs/position", s.handlePosition)
 	mux.HandleFunc("/api/paragraphs/translate", s.handleTranslate)
+	mux.HandleFunc("/api/translation/active", s.handleSetActiveProject)
+	mux.HandleFunc("/api/translation/whole-book", s.handleTranslateWholeBook)
 	mux.HandleFunc("/api/paragraphs/fix", s.handleFixTranslation)
 
 	// Book details

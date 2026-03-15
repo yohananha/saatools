@@ -103,22 +103,190 @@ export const ImportProjectFile = (filePath) => {
 
 // ── Export ────────────────────────────────────────────────────────────────
 
+/** Parse filename from Content-Disposition header; handles quoted values with spaces (e.g. filename="Book - Author - he by Babel.epub"). */
+function filenameFromContentDisposition(disp, defaultName) {
+  if (!disp) return defaultName
+  const m = disp.match(/filename\*=(?:UTF-8'')?([^;\s]+)/i) || disp.match(/filename=(["'])([^"']*)\1/i) || disp.match(/filename=([^;\s]+)/i)
+  if (m) {
+    if (m[2] !== undefined) return m[2].trim()
+    try {
+      return (m[1] ? decodeURIComponent(m[1].trim()) : '').trim() || defaultName
+    } catch (_) { /* ignore */ }
+  }
+  return defaultName
+}
+
+/**
+ * For web/Android: fetch export URL, get full response body, trigger download via <a>, then resolve.
+ */
+async function exportDownload(exportPath, defaultFilename) {
+  const url = BASE + exportPath
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '') || res.statusText
+    throw new Error(text || 'Export failed')
+  }
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), defaultFilename) || defaultFilename
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename || 'download'
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(objectUrl)
+}
+
+/** Convert blob to base64 (for Android bridge saveFile). */
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result
+      const base64 = dataUrl.indexOf(',') >= 0 ? dataUrl.split(',')[1] : dataUrl
+      resolve(base64)
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** POST export: path in body, avoids query encoding. Use for EPUB on Android so server logs and errors are reliable. */
+async function exportEpubPost(path) {
+  const res = await fetch(BASE + '/api/projects/export-epub', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '') || res.statusText
+    throw new Error(text || 'Export failed')
+  }
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), 'export.epub')
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(objectUrl)
+}
+
+/** On Android: choose folder, fetch EPUB, save via bridge so file appears in Downloads (or chosen folder). */
+async function exportEpubToAndroid(path) {
+  const dir = await chooseFolderOnAndroid()
+  if (!dir) return // user cancelled
+  const res = await fetch(BASE + '/api/projects/export-epub', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '') || res.statusText
+    throw new Error(text || 'Export failed')
+  }
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), 'export.epub')
+  const fallback = (path.split('/').pop() || 'export').replace(/\.[^/.]+$/, '') + '.epub'
+  const safeName = filename && /\.epub$/i.test(filename) ? filename : fallback
+  const fullPath = dir.endsWith('/') ? dir + safeName : dir + '/' + safeName
+  const blob = await res.blob()
+  const base64 = await blobToBase64(blob)
+  const result = window.AndroidBridge.saveFile(fullPath, base64)
+  if (result !== 'ok') throw new Error(result)
+}
+
+/** On Android: choose folder, fetch SPZ, save via bridge. */
+async function exportProjectToAndroid(path) {
+  const dir = await chooseFolderOnAndroid()
+  if (!dir) return
+  const res = await fetch(BASE + `/api/projects/export?path=${encodeURIComponent(path)}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '') || res.statusText
+    throw new Error(text || 'Export failed')
+  }
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), 'project.spz')
+  const fallback = (path.split('/').pop() || 'project').replace(/\.[^/.]+$/, '') + '.spz'
+  const safeName = filename && /\.spz$/i.test(filename) ? filename : fallback
+  const fullPath = dir.endsWith('/') ? dir + safeName : dir + '/' + safeName
+  const blob = await res.blob()
+  const base64 = await blobToBase64(blob)
+  const result = window.AndroidBridge.saveFile(fullPath, base64)
+  if (result !== 'ok') throw new Error(result)
+}
+
 /**
  * In Wails mode: saves to destPath chosen by SaveProjectDialog.
- * In web mode:  triggers a browser file download.
+ * Android: folder picker then save via bridge. Web: fetch + programmatic download.
  */
 export const ExportProject = (path, destPath) => {
   if (isWails()) return WailsApp.ExportProject(path, destPath)
-  window.open(BASE + `/api/projects/export?path=${encodeURIComponent(path)}`)
-  return Promise.resolve()
+  if (typeof window !== 'undefined' && window.AndroidBridge) return exportProjectToAndroid(path)
+  return exportDownload(`/api/projects/export?path=${encodeURIComponent(path)}`, 'project.spz')
+}
+
+/**
+ * Export as EPUB (translation + metadata). Wails: save dialog then write. Android: folder picker then save via bridge. Web: POST + programmatic download.
+ */
+export const ExportProjectEPUB = (path, destPath) => {
+  if (isWails()) return WailsApp.ExportProjectEPUB(path, destPath)
+  if (typeof window !== 'undefined' && window.AndroidBridge) return exportEpubToAndroid(path)
+  return exportEpubPost(path)
+}
+
+/** On Android: choose folder, fetch TXT, save via bridge. */
+async function exportTxtToAndroid(path) {
+  const dir = await chooseFolderOnAndroid()
+  if (!dir) return
+  const res = await fetch(BASE + `/api/projects/export-txt?path=${encodeURIComponent(path)}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '') || res.statusText
+    throw new Error(text || 'Export failed')
+  }
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), 'translation.txt')
+  const fallback = (path.split('/').pop() || 'translation').replace(/\.[^/.]+$/, '') + '-translation.txt'
+  const safeName = filename && /\.(txt|text)$/i.test(filename) ? filename : fallback
+  const fullPath = dir.endsWith('/') ? dir + safeName : dir + '/' + safeName
+  const blob = await res.blob()
+  const base64 = await blobToBase64(blob)
+  const result = window.AndroidBridge.saveFile(fullPath, base64)
+  if (result !== 'ok') throw new Error(result)
+}
+
+/**
+ * Export translation only as TXT. Wails: save dialog then write. Android: folder picker then save via bridge. Web: fetch + download.
+ */
+export const ExportProjectTranslationOnly = (path, destPath) => {
+  if (isWails()) return WailsApp.ExportProjectTranslationOnly(path, destPath)
+  if (typeof window !== 'undefined' && window.AndroidBridge) return exportTxtToAndroid(path)
+  return exportDownload(`/api/projects/export-txt?path=${encodeURIComponent(path)}`, 'translation.txt')
 }
 
 // ── File dialogs (Wails desktop only) ────────────────────────────────────
 // In web mode, components use <input type="file"> directly.
 
 export const OpenEPUBDialog    = () => WailsApp.OpenEPUBDialog()
+export const OpenFolderDialog  = () => WailsApp.OpenFolderDialog()
 export const OpenProjectDialog = () => WailsApp.OpenProjectDialog()
+
+/** On Android: show folder presets dialog; returns a Promise that resolves with the chosen path or null. */
+export function chooseFolderOnAndroid() {
+  if (typeof window === 'undefined' || !window.AndroidBridge) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    window.onFolderChosen = (path) => {
+      window.onFolderChosen = null
+      resolve(path || null)
+    }
+    window.AndroidBridge.showFolderPresets()
+  })
+}
 export const SaveProjectDialog = (name) => WailsApp.SaveProjectDialog(name)
+export const SaveEPUBDialog    = (name) => WailsApp.SaveEPUBDialog(name)
+export const SaveTextDialog    = (name) => WailsApp.SaveTextDialog(name)
 
 // ── Paragraphs ────────────────────────────────────────────────────────────
 
@@ -138,6 +306,16 @@ export const SavePosition = (path, index, sourceView) =>
 export const TranslateParagraphs = (path, from) =>
   isWails() ? WailsApp.TranslateParagraphs(path, from)
             : apiFetch('POST', '/api/paragraphs/translate', { path, from })
+
+/** Set the project allowed to run translation (e.g. book open in Reader). Pass '' when leaving Reader. */
+export const SetActiveProject = (path) =>
+  isWails() ? WailsApp.SetActiveProject(path || '')
+            : apiFetch('POST', '/api/translation/active', { path: path || '' })
+
+/** Translate the entire book in the background. Stops when user opens another book. */
+export const TranslateWholeBook = (path) =>
+  isWails() ? WailsApp.TranslateWholeBook(path)
+            : apiFetch('POST', '/api/translation/whole-book', { path })
 
 export const FixTranslation = (path, index) =>
   isWails() ? WailsApp.FixTranslation(path, index)

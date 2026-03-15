@@ -6,6 +6,12 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/emvi/iso-639-1 v1.1.1 h1:7jrl1Sqw9ZYWmCOaH+cpQotLbGr/khwlLPXlBvE8WXU=
 github.com/emvi/iso-639-1 v1.1.1/go.mod h1:CSA53/Tx0xF9bk2DEA0Mr0wTdIxq7pqoVZgBOfoL5GI=
+github.com/gabriel-vasile/mimetype v1.4.3 h1:in2uUcidCuFcDKtdcBxlR0rJ1+fsokWf+uqxgUFjbI0=
+github.com/gabriel-vasile/mimetype v1.4.3/go.mod h1:d8uq/6HKRL6CGdk+aubisF/M5GcPfT7nKyLpA0lbSSk=
+github.com/go-shiori/go-epub v1.2.1 h1:+K/WxrvmfFQY69cpryiObrT6X7WhkwpqhHY65AHs2Rg=
+github.com/go-shiori/go-epub v1.2.1/go.mod h1:3rCTODnigEgy2j3ksndClrGT9h/dcz3js9q4yPX7hf8=
+github.com/gofrs/uuid/v5 v5.0.0 h1:p544++a97kEL+svbcFbCQVM9KFu0Yo25UoISXGNNH9M=
+github.com/gofrs/uuid/v5 v5.0.0/go.mod h1:CDOjlDMVAtN56jqyRUZh58JT31Tiw7/oQyEXZV+9bD8=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
@@ -34,6 +40,8 @@ github.com/taylorskalyo/goreader v1.0.1 h1:eS9SYiHai2aAHhm+YMGRTqrvNt2aoRMTd7p6f
 github.com/taylorskalyo/goreader v1.0.1/go.mod h1:JrUsWCgnk4C3P5Jsr7Pf2mFrMpsR0ls/0bjR5aorYTI=
 github.com/urfave/cli/v3 v3.4.1 h1:1M9UOCy5bLmGnuu1yn3t3CB4rG79Rtoxuv1sPhnm6qM=
 github.com/urfave/cli/v3 v3.4.1/go.mod h1:FJSKtM/9AiiTOJL4fJ6TbMUkxBXn7GO9guZqoZtpYpo=
+github.com/vincent-petithory/dataurl v1.0.0 h1:cXw+kPto8NLuJtlMsI152irrVw9fRDX8AbShPRpg2CI=
+github.com/vincent-petithory/dataurl v1.0.0/go.mod h1:FHafX5vmDzyP+1CQATJn7WFKc9CvnvxyvZy6I1MrG/U=
 golang.org/x/mobile v0.0.0-20260217195705-b56b3793a9c4 h1:uT3oYo9M38vJa7JpT4kCie2lJwOpoUrx7FvV0H7kXSc=
 golang.org/x/mobile v0.0.0-20260217195705-b56b3793a9c4/go.mod h1:4OGHIUSBiIqyFAQDaX1tpY0BVnO20DvNDeATBu8aeFQ=
 golang.org/x/mod v0.33.0 h1:tHFzIWbBifEmbwtGz65eaWyGiGZatSrT9prnU8DbVL8=

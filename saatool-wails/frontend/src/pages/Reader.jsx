@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react'
 import {
-  GetParagraphsBatch, TranslateParagraphs,
+  GetParagraphsBatch, TranslateParagraphs, SetActiveProject,
   FixTranslation, SavePosition, GetLastPosition, SaveProject,
   GetGlossary, SetGlossaryEntry, DeleteGlossaryEntry,
   GetBookmarks, AddBookmark, DeleteBookmark,
-  onTranslationComplete, ExportProject,
+  onTranslationComplete, ExportProject, ExportProjectEPUB,
 } from '../api'
 import { toast } from '../App'
 
@@ -227,6 +227,16 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const overlayTimer = useRef(null)
   const clipRef      = useRef(null)
   const paraRefs     = useRef([])
+
+  // ── Set active project so only this book can run translation; on unmount clear and persist .spz ─
+  useEffect(() => {
+    SetActiveProject(project.path)
+    return () => {
+      SetActiveProject('')
+      // Persist project to .spz when leaving so translation progress and position are saved
+      SaveProject(project.path).catch(() => {})
+    }
+  }, [project.path])
 
   // ── Reset session counters when project changes ───────────────────────────
   useEffect(() => {
@@ -468,6 +478,17 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     }
   }
 
+  // ── Export as EPUB (from Reader so user doesn't need to go to Library) ─────
+  async function handleExportEPUB() {
+    toast('Exporting EPUB…', 'info')
+    try {
+      await ExportProjectEPUB(project.path, null)
+      toast('Exported successfully', 'success')
+    } catch (e) {
+      toast(`Export failed: ${e}`, 'error')
+    }
+  }
+
   // ── Text selection → glossary popup ──────────────────────────────────────
   function handleTextSelection() {
     const sel = window.getSelection()
@@ -656,6 +677,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
                 </button>
               )}
               {!isDirect && bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
+              {!isDirect && (
+                <button className="btn overlay-btn" onClick={handleExportEPUB} title="Export as EPUB">
+                  📖 EPUB
+                </button>
+              )}
               <button
                 className={`btn overlay-btn${pageBookmark ? ' active' : ''}`}
                 onClick={openBookmarkModal}

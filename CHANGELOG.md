@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-03-15
+
+### Added
+- **Export from Reader** — EPUB export button (📖 EPUB) in the reader overlay so users can export without returning to the Library.
+- **Android export persistence** — On Android, EPUB/SPZ/TXT export now saves files to a chosen folder. The WebView does not handle programmatic `<a download>`; the app shows the folder picker (Downloads / App storage or document tree), fetches the export from the server, then writes the file via a new `AndroidBridge.saveFile(fullPath, base64)` bridge method.
+- **Request logging** — All HTTP requests are logged (method + path, and query for `/api/` routes) to aid debugging in the in-app log.
+
+### Changed
+- **EPUB export filename** — Exported EPUB filename is now `{bookName} - {author} - {targetLang} by Babel.epub` (e.g. `Hooray for Hair! - Dr. Seuss - he by Babel.epub`). The server sets this in `Content-Disposition`; the frontend parses quoted filenames correctly so the full name is used when saving on Android and in the browser.
+
+### Fixed
+- **Android EPUB export produced no file** — The server returned the EPUB bytes with 200, but the frontend only triggered a programmatic download; on Android WebView that does not persist to storage. Export now uses the folder picker + `saveFile` bridge so the file appears in the chosen folder.
+- **Android “permission denied” creating temp dir** — go-epub used `os.TempDir()` (e.g. `/data/local/tmp`), which the app cannot write to. When running with a `filesDir` (Android), the server calls `epub.Use(epub.MemoryFS)` so EPUB building uses in-memory storage, and `TMPDIR` is set to the app’s tmp directory in `mobile.Start()`.
+- **Export failures returned 200 with empty body** — EPUB (and SPZ/TXT) handlers now buffer the response first; on error they return HTTP 500 with an error message instead of 200 and an empty body, so the client can show a proper error toast.
+- **Empty projects could produce invalid EPUB** — If every target paragraph was empty, no sections were added and go-epub could write an invalid or zero-byte file. The exporter now adds a single “Content” section with an empty paragraph when no sections were added.
+- **EPUB filename with spaces not used on Android** — The frontend parsed `Content-Disposition` with a regex that stopped at the first space, so only the first word of the filename was used. Added `filenameFromContentDisposition()` to correctly parse quoted values (e.g. `filename="Book - Author - he by Babel.epub"`) and use the full name for all exports (EPUB, SPZ, TXT).
+
+---
+
 ## [Unreleased] — 2026-03-11
 
 ### Added

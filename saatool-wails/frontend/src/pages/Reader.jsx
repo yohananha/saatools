@@ -201,6 +201,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const [showOverlay,    setShowOverlay]    = useState(false)
   const [showFontPanel,  setShowFontPanel]  = useState(false)
   const [fittingCount,   setFittingCount]   = useState(BATCH)
+  const [straddleMaxHeight, setStraddleMaxHeight] = useState(null) // {index, maxHeight} | null
   const [keepScreenOn,   setKeepScreenOn]   = useState(
     () => localStorage.getItem('babelreader.keepScreenOn') !== 'false'
   )
@@ -271,6 +272,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
         if (cancelled) return
         const items = batch || []
         setParagraphs(items)
+        setStraddleMaxHeight(null)
         setFadeKey(k => k + 1)
         setTranslatingSet(
           !isSource ? new Set(items.filter(p => !p.text).map(p => p.index)) : new Set()
@@ -303,6 +305,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     if (!clipRef.current || visibleParagraphs.length === 0) {
       setNextStart(defaultNext)
       setFittingCount(visibleParagraphs.length)
+      setStraddleMaxHeight(null)
       return
     }
 
@@ -313,6 +316,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
     let next    = defaultNext
     let fitting = visibleParagraphs.length
+    let straddle = null   // will hold {index, maxHeight} if a paragraph straddles
 
     for (let i = 0; i < visibleParagraphs.length; i++) {
       const el = paraRefs.current[i]
@@ -320,27 +324,38 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
       const rect = el.getBoundingClientRect()
       if (rect.bottom <= clipBottom) continue   // fully visible — keep going
 
-      fitting = Math.max(1, i)
-
       if (rect.top >= clipBottom) {
         // Whole paragraph below fold — push it entirely to next page
+        fitting = Math.max(1, i)
         next = { para: visibleParagraphs[i].index, offset: 0 }
       } else {
-        // Paragraph straddles fold — split at the character boundary
-        const charOffset = caretOffsetAtY(el, clipBottom)
+        // Paragraph straddles fold — snap to complete lines
+        const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || (fontSize * 1.85)
+        const visibleHeight = clipBottom - rect.top
+        let completeLines = Math.floor(visibleHeight / lineHeight)
+
+        if (completeLines < 1) completeLines = 1  // always show at least 1 line
+
+        const splitY = rect.top + (completeLines * lineHeight)
+        const charOffset = caretOffsetAtY(el, splitY)
+        const baseOffset = i === 0 ? ps.offset : 0
+
         if (charOffset !== null && charOffset > 0) {
-          // Add back the slice offset that was applied to the first paragraph
-          const baseOffset = i === 0 ? ps.offset : 0
           next = { para: visibleParagraphs[i].index, offset: baseOffset + charOffset }
         } else {
           next = { para: visibleParagraphs[i].index, offset: 0 }
         }
+
+        // Include the straddling paragraph as visible, capped to complete lines
+        fitting = i + 1
+        straddle = { index: i, maxHeight: completeLines * lineHeight }
       }
       break
     }
 
     setNextStart(next)
     setFittingCount(fitting)
+    setStraddleMaxHeight(straddle)
   }, [paragraphs, fontSize])   // ← only paragraphs/fontSize; pageStart via ref
 
   // ── Translation events ────────────────────────────────────────────────────
@@ -644,6 +659,9 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
                   style={{
                     fontSize: `${fontSize}px`,
                     visibility: i < fittingCount ? 'visible' : 'hidden',
+                    ...(straddleMaxHeight?.index === i
+                      ? { maxHeight: straddleMaxHeight.maxHeight, overflow: 'hidden' }
+                      : {}),
                   }}
                 >
                   {translatingSet.has(p.index)

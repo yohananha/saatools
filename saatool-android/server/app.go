@@ -673,15 +673,10 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 	if total == 0 {
 		return nil
 	}
-	// Find the first untranslated paragraph to use as start index.
-	startIndex := total
-	for i := 0; i < total; i++ {
-		if i >= len(p.Target.Paragraphs) || p.Target.Paragraphs[i].Text == "" {
-			startIndex = i
-			break
-		}
-	}
-	if startIndex == total {
+	// Start after the last translated paragraph, so front-matter gaps don't
+	// reset progress to index 0.
+	startIndex := p.LastTranslatedIndex() + 1
+	if startIndex >= total {
 		return nil
 	}
 

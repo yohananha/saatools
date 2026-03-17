@@ -333,16 +333,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           const baseOffset = i === 0 ? ps.offset : 0
           next = { para: visibleParagraphs[i].index, offset: baseOffset + charOffset }
         } else {
-          // caretRangeFromPoint failed; estimate split proportionally so we
-          // always advance rather than looping back to the same position.
-          const rect2 = el.getBoundingClientRect()
-          const fraction = rect2.height > 0
-            ? Math.max(0, Math.min(1, (clipBottom - rect2.top) / rect2.height))
-            : 0
-          const textLen = el.textContent.length
-          const estimated = Math.max(1, Math.floor(fraction * textLen))
-          const baseOffset = i === 0 ? ps.offset : 0
-          next = { para: visibleParagraphs[i].index, offset: baseOffset + estimated }
+          next = { para: visibleParagraphs[i].index, offset: 0 }
         }
       }
       break

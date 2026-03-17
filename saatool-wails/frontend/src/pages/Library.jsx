@@ -428,7 +428,6 @@ function BookCard({ info, onOpen, onDelete, onExportSPZ, onExportEPUB, onExportT
       </div>
 
       <div className="book-meta">
-        <div className="book-title">{info.title || info.name}</div>
         {/* Single bar: back layer = longer value, front layer = shorter value */}
         {(() => {
           const backPct  = info.direct ? readPct : Math.max(readPct, transPct)

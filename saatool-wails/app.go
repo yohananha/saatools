@@ -602,16 +602,11 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 	if total == 0 {
 		return nil
 	}
-	if total <= len(p.Target.Paragraphs) {
-		allDone := true
-		for i := 0; i < total && allDone; i++ {
-			if p.Target.Paragraphs[i].Text == "" {
-				allDone = false
-			}
-		}
-		if allDone {
-			return nil
-		}
+	// Start after the last translated paragraph, so front-matter gaps don't
+	// reset progress to index 0.
+	startIndex := p.LastTranslatedIndex() + 1
+	if startIndex >= total {
+		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.activeMu.Lock()
@@ -630,7 +625,7 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 			}
 			a.activeMu.Unlock()
 		}()
-		for i := 0; i < total; i += batchSize {
+		for i := startIndex; i < total; i += batchSize {
 			select {
 			case <-ctx.Done():
 				return

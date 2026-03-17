@@ -207,14 +207,36 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** Opens the system file manager to choose a folder (like Import). Calls window.onFolderChosen(path) with the chosen path, or shows preset options if the chosen folder cannot be used. */
+        /** Shows a folder chooser dialog. Defaults to Downloads and App storage presets, with an option to open the system folder picker for other locations. Calls window.onFolderChosen(path). */
         @JavascriptInterface
         fun showFolderPresets() {
             runOnUiThread {
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-                intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                @Suppress("DEPRECATION")
-                startActivityForResult(intent, FOLDER_PICKER_REQUEST)
+                val downloadsPath = publicDownloadsPath()
+                val appPath = applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.absolutePath
+                    ?: applicationContext.filesDir.absolutePath
+                val items = mutableListOf<Pair<String, String?>>()
+                if (downloadsPath != null) items.add("Downloads" to downloadsPath)
+                items.add("App storage" to appPath)
+                items.add("Choose other\u2026" to null)
+                val labels = items.map { it.first }.toTypedArray()
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Save to")
+                    .setItems(labels) { _, which ->
+                        val chosen = items.getOrNull(which) ?: return@setItems
+                        if (chosen.second != null) {
+                            val escaped = chosen.second!!.replace("\\", "\\\\").replace("'", "\\'")
+                            webView.evaluateJavascript(
+                                "typeof window.onFolderChosen === 'function' && window.onFolderChosen('$escaped');",
+                                null)
+                        } else {
+                            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            @Suppress("DEPRECATION")
+                            startActivityForResult(intent, FOLDER_PICKER_REQUEST)
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
             }
         }
 

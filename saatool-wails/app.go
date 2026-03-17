@@ -506,7 +506,8 @@ func (a *App) ExportProjectEPUB(projectPath, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	return export.ProjectToEPUB(p, outputPath)
+	cp, _ := coverPathForProject(projectPath)
+	return export.ProjectToEPUB(p, outputPath, cp)
 }
 
 // GetLastPosition returns the last saved reading position in a project.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { GetSettings, SaveSettings } from '../api'
+import { GetSettings, SaveSettings, OpenFolderDialog, chooseFolderOnAndroid, isWails } from '../api'
 import { toast } from '../App'
 import Log from './Log'
 
@@ -111,6 +111,44 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
         </Row>
       </Section>
 
+      <Section title="Folder for exported books">
+        <Row label="Folder" hint={isWails() ? 'Where books (.spz) are stored. Tap to choose.' : 'Books are stored here. Tap Change folder to pick. Only folders on internal storage can be used; for SD card use Downloads or App storage.'}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+            {s.projectsDirectory ? (
+              <div className="settings-row-hint" style={{ alignSelf: 'stretch', wordBreak: 'break-all' }}>
+                {s.projectsDirectory}
+              </div>
+            ) : null}
+            {isWails() ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  const path = await OpenFolderDialog()
+                  if (path) set('projectsDirectory', path)
+                }}
+              >
+                Choose folder
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  const path = await chooseFolderOnAndroid()
+                  if (path) {
+                    set('projectsDirectory', path)
+                    toast('Folder updated. Tap Save to apply.', 'success')
+                  }
+                }}
+              >
+                Change folder
+              </button>
+            )}
+          </div>
+        </Row>
+      </Section>
+
       <Section title="AI / API">
         <Row label="DeepSeek API key">
           <input
@@ -149,6 +187,22 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
           <Toggle
             checked={s.autoProofread}
             onChange={v => set('autoProofread', v)}
+          />
+        </Row>
+        <Row label="Parallel calls" hint="Max simultaneous API calls (1–8, higher = faster)">
+          <input
+            type="number" min={1} max={8}
+            className="settings-input"
+            value={s.maxConcurrentTranslations}
+            onChange={e => set('maxConcurrentTranslations', parseInt(e.target.value, 10) || 4)}
+          />
+        </Row>
+        <Row label="Batch size" hint="Paragraphs per API call (1 = each paragraph appears immediately)">
+          <input
+            type="number" min={1} max={10}
+            className="settings-input"
+            value={s.translationBatchSize}
+            onChange={e => set('translationBatchSize', parseInt(e.target.value, 10) || 1)}
           />
         </Row>
         <Row label="Fix model" hint="Model used when tapping the Fix button">

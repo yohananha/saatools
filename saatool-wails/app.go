@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"github.com/dtylman/saatool/actions"
 	"github.com/dtylman/saatool/ai"
 	"github.com/dtylman/saatool/config"
+	"github.com/dtylman/saatool/export"
 	"github.com/dtylman/saatool/translation"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -58,15 +60,18 @@ type Position struct {
 
 // Settings mirrors config.Options for the frontend.
 type Settings struct {
-	DeepSeekAPIKey     string `json:"deepSeekAPIKey"`
-	TranslateAhead     int    `json:"translateAhead"`
-	AppSize            int    `json:"appSize"`
-	TranslationDocSize int    `json:"translationDocSize"`
-	AutoProofread      bool   `json:"autoProofread"`
-	SourceLanguage     string `json:"sourceLanguage"`
-	TargetLanguage     string `json:"targetLanguage"`
-	DarkMode           bool   `json:"darkMode"`
-	FixModel           string `json:"fixModel"`
+	DeepSeekAPIKey            string `json:"deepSeekAPIKey"`
+	TranslateAhead            int    `json:"translateAhead"`
+	AppSize                   int    `json:"appSize"`
+	TranslationDocSize        int    `json:"translationDocSize"`
+	AutoProofread             bool   `json:"autoProofread"`
+	SourceLanguage            string `json:"sourceLanguage"`
+	TargetLanguage            string `json:"targetLanguage"`
+	DarkMode                  bool   `json:"darkMode"`
+	FixModel                  string `json:"fixModel"`
+	MaxConcurrentTranslations int    `json:"maxConcurrentTranslations"`
+	TranslationBatchSize      int    `json:"translationBatchSize"`
+	ProjectsDirectory        string `json:"projectsDirectory"`
 }
 
 // BookDetailsInfo carries per-book metadata to and from the frontend.
@@ -98,6 +103,10 @@ type App struct {
 	// ALL TranslateParagraphs invocations, preventing goroutine accumulation when
 	// the user triggers rapid translate-ahead requests.
 	translationSem chan struct{}
+
+	activeMu          sync.Mutex
+	activeProjectPath string
+	projectCancel     map[string]context.CancelFunc
 }
 
 // NewApp creates a new App instance.
@@ -105,7 +114,8 @@ func NewApp() *App {
 	return &App{
 		projects:       make(map[string]*translation.Project),
 		translators:    make(map[string]*ai.Translator),
-		translationSem: make(chan struct{}, maxConcurrentTranslations),
+		translationSem: make(chan struct{}, config.Options.MaxConcurrentTranslations),
+		projectCancel:  make(map[string]context.CancelFunc),
 	}
 }
 
@@ -199,11 +209,13 @@ func (a *App) setupTranslatorLocked(projectPath string, p *translation.Project) 
 			Index:       index,
 			Text:        text,
 		})
-		// Auto-save every 5 translated paragraphs so progress survives a crash.
+		// Auto-save every 5 translated paragraphs in parallel so translation is not blocked.
 		if atomic.AddInt32(&saveCount, 1)%5 == 0 {
-			if _, err := p.Save(); err != nil {
-				log.Printf("auto-save error for %s: %v", projectPath, err)
-			}
+			go func() {
+				if _, err := p.Save(); err != nil {
+					log.Printf("auto-save error for %s: %v", projectPath, err)
+				}
+			}()
 		}
 	}
 	a.translators[projectPath] = t
@@ -465,15 +477,51 @@ func (a *App) ExportProjectText(projectPath, outputPath string) error {
 	return nil
 }
 
+// ExportProjectTranslationOnly writes only the target (translated) paragraphs to a text file.
+// Paragraphs are separated by blank lines; chapter starts can be marked with a line of dashes.
+func (a *App) ExportProjectTranslationOnly(projectPath, outputPath string) error {
+	p, err := a.getOrLoad(projectPath)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("could not create export file: %w", err)
+	}
+	defer f.Close()
+
+	for i, para := range p.Target.Paragraphs {
+		if i > 0 && para.IsChapterStart {
+			_, _ = io.WriteString(f, "\n---\n\n")
+		}
+		_, _ = io.WriteString(f, para.Text)
+		_, _ = io.WriteString(f, "\n\n")
+	}
+	return nil
+}
+
+// ExportProjectEPUB writes the project as an EPUB (translation + metadata) to the given path.
+func (a *App) ExportProjectEPUB(projectPath, outputPath string) error {
+	p, err := a.getOrLoad(projectPath)
+	if err != nil {
+		return err
+	}
+	return export.ProjectToEPUB(p, outputPath)
+}
+
 // GetLastPosition returns the last saved reading position in a project.
+// If the saved position is 0 and there is translated content, returns the
+// last translated paragraph and target view so the book opens at the end of
+// the translated part.
 func (a *App) GetLastPosition(projectPath string) (*Position, error) {
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {
 		return nil, err
 	}
+	index, sourceView := p.EffectiveOpenPosition()
 	return &Position{
-		Index:      p.LastParagraphIndex,
-		SourceView: p.LastSourceView,
+		Index:      index,
+		SourceView: sourceView,
 	}, nil
 }
 
@@ -513,18 +561,107 @@ func (a *App) TranslateParagraph(projectPath string, index int) error {
 	return nil
 }
 
-// maxConcurrentTranslations limits how many batch goroutines run in parallel
-// to avoid triggering DeepSeek rate-limits when TranslateAhead > 2.
-const maxConcurrentTranslations = 2
+// SetActiveProject sets the project allowed to run translation (e.g. the book open in Reader).
+// Any in-flight translation for other projects is cancelled; those projects are saved to .spz so progress is not lost.
+// Pass "" when leaving the Reader.
+func (a *App) SetActiveProject(projectPath string) {
+	a.activeMu.Lock()
+	a.activeProjectPath = projectPath
+	var toSave []string
+	for path, cancel := range a.projectCancel {
+		if projectPath == "" || path != projectPath {
+			cancel()
+			delete(a.projectCancel, path)
+			toSave = append(toSave, path)
+		}
+	}
+	a.activeMu.Unlock()
+	for _, path := range toSave {
+		if err := a.SaveProject(path); err != nil {
+			log.Printf("save project on cancel %s: %v", path, err)
+		}
+	}
+}
 
-// translationBatchSize is the number of paragraphs sent in a single API call.
-const translationBatchSize = 5
+// TranslateWholeBook translates the entire project from paragraph 0 to end in the background.
+func (a *App) TranslateWholeBook(projectPath string) error {
+	a.mu.Lock()
+	t, ok := a.translators[projectPath]
+	p, pok := a.projects[projectPath]
+	a.mu.Unlock()
+	if !ok || !pok {
+		if _, err := a.LoadProject(projectPath); err != nil {
+			return err
+		}
+		a.mu.Lock()
+		t = a.translators[projectPath]
+		p = a.projects[projectPath]
+		a.mu.Unlock()
+	}
+	total := len(p.Source.Paragraphs)
+	if total == 0 {
+		return nil
+	}
+	if total <= len(p.Target.Paragraphs) {
+		allDone := true
+		for i := 0; i < total && allDone; i++ {
+			if p.Target.Paragraphs[i].Text == "" {
+				allDone = false
+			}
+		}
+		if allDone {
+			return nil
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.activeMu.Lock()
+	a.projectCancel[projectPath] = cancel
+	a.activeMu.Unlock()
+	batchSize := config.Options.TranslationBatchSize
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	go func() {
+		defer func() {
+			a.activeMu.Lock()
+			if c, ok := a.projectCancel[projectPath]; ok {
+				c()
+				delete(a.projectCancel, projectPath)
+			}
+			a.activeMu.Unlock()
+		}()
+		for i := 0; i < total; i += batchSize {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			batchEnd := i + batchSize
+			if batchEnd > total {
+				batchEnd = total
+			}
+			indices := make([]int, batchEnd-i)
+			for j := range indices {
+				indices[j] = i + j
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case a.translationSem <- struct{}{}:
+			}
+			func(batch []int) {
+				defer func() { <-a.translationSem }()
+				if err := t.TranslateAndProofReadBatch(ctx, batch); err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("whole-book batch error (%v): %v", batch, err)
+				}
+			}(indices)
+		}
+	}()
+	return nil
+}
 
-// TranslateParagraphs triggers batched translation of paragraphs starting at
-// fromIndex. Paragraphs are grouped into batches of translationBatchSize and
-// dispatched via the shared App-level semaphore so that concurrent calls to
-// this function (e.g. rapid translate-ahead taps) never exceed
-// maxConcurrentTranslations simultaneous API calls in total.
+// TranslateParagraphs triggers batched translation starting at fromIndex. Uses a cancellable
+// context so SetActiveProject can stop it when the user switches books.
 func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 	a.mu.Lock()
 	t, ok := a.translators[projectPath]
@@ -545,14 +682,54 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 	if end > len(p.Source.Paragraphs) {
 		end = len(p.Source.Paragraphs)
 	}
+	if end > len(p.Target.Paragraphs) {
+		end = len(p.Target.Paragraphs)
+	}
+	allTranslated := true
+	for i := fromIndex; i < end && allTranslated; i++ {
+		if p.Target.Paragraphs[i].Text == "" {
+			allTranslated = false
+		}
+	}
+	if allTranslated && fromIndex < end {
+		return nil
+	}
 
-	// Launch the batch loop in a background goroutine so this function returns
-	// immediately. The semaphore send inside the loop can block while all
-	// translation slots are full — keeping that wait inside a Wails binding
-	// call would freeze the frontend's promise until a slot is free.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.activeMu.Lock()
+	a.projectCancel[projectPath] = cancel
+	a.activeMu.Unlock()
+
 	go func() {
-		for i := fromIndex; i < end; i += translationBatchSize {
-			batchEnd := i + translationBatchSize
+		defer func() {
+			a.activeMu.Lock()
+			if c, ok := a.projectCancel[projectPath]; ok {
+				c()
+				delete(a.projectCancel, projectPath)
+			}
+			a.activeMu.Unlock()
+		}()
+		select {
+		case <-ctx.Done():
+			return
+		case a.translationSem <- struct{}{}:
+		}
+		if err := t.Translate(ctx, fromIndex); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("translation error (current %d): %v", fromIndex, err)
+		}
+		<-a.translationSem
+
+		batchSize := config.Options.TranslationBatchSize
+		if batchSize < 1 {
+			batchSize = 1
+		}
+		for i := fromIndex + 1; i < end; i += batchSize {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			batchEnd := i + batchSize
 			if batchEnd > end {
 				batchEnd = end
 			}
@@ -560,10 +737,14 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 			for j := range indices {
 				indices[j] = i + j
 			}
-			a.translationSem <- struct{}{}
+			select {
+			case <-ctx.Done():
+				return
+			case a.translationSem <- struct{}{}:
+			}
 			go func(batch []int) {
 				defer func() { <-a.translationSem }()
-				if err := t.TranslateAndProofReadBatch(a.ctx, batch); err != nil {
+				if err := t.TranslateAndProofReadBatch(ctx, batch); err != nil && !errors.Is(err, context.Canceled) {
 					log.Printf("batch translation error (%v): %v", batch, err)
 				}
 			}(indices)
@@ -1014,15 +1195,18 @@ func (a *App) GetSettings() Settings {
 	return Settings{
 		// C-1: Return a masked key so the full value is never exposed via Wails IPC.
 		// SaveSettings ignores submitted values that contain '*'.
-		DeepSeekAPIKey:     maskAPIKey(config.Options.DeepSeekAPIKey),
-		TranslateAhead:     config.Options.TranslateAhead,
-		AppSize:            config.Options.AppSize,
-		TranslationDocSize: config.Options.TranslationDocSize,
-		AutoProofread:      config.Options.AutoProofread,
-		SourceLanguage:     config.Options.SourceLanguage,
-		TargetLanguage:     config.Options.TargetLanguage,
-		DarkMode:           config.Options.DarkMode,
-		FixModel:           config.Options.FixModel,
+		DeepSeekAPIKey:            maskAPIKey(config.Options.DeepSeekAPIKey),
+		TranslateAhead:            config.Options.TranslateAhead,
+		AppSize:                   config.Options.AppSize,
+		TranslationDocSize:        config.Options.TranslationDocSize,
+		AutoProofread:             config.Options.AutoProofread,
+		SourceLanguage:            config.Options.SourceLanguage,
+		TargetLanguage:            config.Options.TargetLanguage,
+		DarkMode:                  config.Options.DarkMode,
+		FixModel:                  config.Options.FixModel,
+		MaxConcurrentTranslations: config.Options.MaxConcurrentTranslations,
+		TranslationBatchSize:      config.Options.TranslationBatchSize,
+		ProjectsDirectory:         config.Options.ProjectsDirectory,
 	}
 }
 
@@ -1042,9 +1226,22 @@ func (a *App) SaveSettings(s Settings) error {
 	if s.FixModel != "" && s.FixModel != "deepseek-chat" && s.FixModel != "deepseek-reasoner" {
 		return fmt.Errorf("fixModel must be \"deepseek-chat\" or \"deepseek-reasoner\"")
 	}
+	if s.MaxConcurrentTranslations < 1 || s.MaxConcurrentTranslations > 8 {
+		return fmt.Errorf("maxConcurrentTranslations must be between 1 and 8")
+	}
+	if s.TranslationBatchSize < 1 || s.TranslationBatchSize > 10 {
+		return fmt.Errorf("translationBatchSize must be between 1 and 10")
+	}
 	const maxSavedLangLen = 100
 	if len(s.SourceLanguage) > maxSavedLangLen || len(s.TargetLanguage) > maxSavedLangLen {
 		return fmt.Errorf("language field too long (max %d chars)", maxSavedLangLen)
+	}
+	// Validate projects directory: if set, must be a path we can create/use (avoids crash later in ProjectsDir).
+	if dir := strings.TrimSpace(s.ProjectsDirectory); dir != "" {
+		dir = filepath.Clean(dir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("cannot use folder: %w", err)
+		}
 	}
 	// C-1: Only update the API key when the submitted value is not the masked
 	// placeholder (i.e. the user actually typed a new key).
@@ -1059,6 +1256,17 @@ func (a *App) SaveSettings(s Settings) error {
 	config.Options.TargetLanguage = strings.TrimSpace(s.TargetLanguage)
 	config.Options.DarkMode = s.DarkMode
 	config.Options.FixModel = strings.TrimSpace(s.FixModel)
+	config.Options.MaxConcurrentTranslations = s.MaxConcurrentTranslations
+	config.Options.TranslationBatchSize = s.TranslationBatchSize
+	config.Options.ProjectsDirectory = strings.TrimSpace(s.ProjectsDirectory)
+	// Recreate semaphore when concurrency changes so new batches respect the
+	// new limit immediately. Old goroutines hold the previous channel reference
+	// and will release their tokens to it safely; the old channel is then GC'd.
+	if cap(a.translationSem) != s.MaxConcurrentTranslations {
+		a.mu.Lock()
+		a.translationSem = make(chan struct{}, s.MaxConcurrentTranslations)
+		a.mu.Unlock()
+	}
 	return config.SaveOptions()
 }
 
@@ -1070,6 +1278,36 @@ func (a *App) GetLog() []string {
 }
 
 // ─── File dialogs ────────────────────────────────────────────────────────────
+
+// defaultExportDir returns a directory outside the projects folder for export save dialogs,
+// so that exported files do not appear as duplicate entries in the library.
+// Prefers user's Documents; falls back to home dir. Returns empty string if none exist.
+func defaultExportDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	docs := filepath.Join(home, "Documents")
+	if info, err := os.Stat(docs); err == nil && info.IsDir() {
+		return docs
+	}
+	if info, err := os.Stat(home); err == nil && info.IsDir() {
+		return home
+	}
+	return ""
+}
+
+// OpenFolderDialog shows a native directory picker and returns the selected path (empty if cancelled).
+func (a *App) OpenFolderDialog() string {
+	path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Choose folder for books",
+	})
+	if err != nil {
+		log.Printf("open folder dialog error: %v", err)
+		return ""
+	}
+	return path
+}
 
 // OpenEPUBDialog shows a native open dialog filtered to EPUB files.
 func (a *App) OpenEPUBDialog() string {
@@ -1102,17 +1340,22 @@ func (a *App) OpenProjectDialog() string {
 }
 
 // SaveProjectDialog shows a native save dialog for exporting a project.
+// Default directory is set outside the projects folder so exports do not appear in the library.
 func (a *App) SaveProjectDialog(suggestedName string) string {
 	if filepath.Ext(suggestedName) == "" {
 		suggestedName += config.ProjectFileExt
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	opts := runtime.SaveDialogOptions{
 		Title:           "Export Project",
 		DefaultFilename: suggestedName,
 		Filters: []runtime.FileFilter{
 			{DisplayName: "SaaTool projects (*.spz)", Pattern: "*.spz"},
 		},
-	})
+	}
+	if dir := defaultExportDir(); dir != "" {
+		opts.DefaultDirectory = dir
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, opts)
 	if err != nil {
 		log.Printf("save project dialog error: %v", err)
 		return ""
@@ -1121,19 +1364,48 @@ func (a *App) SaveProjectDialog(suggestedName string) string {
 }
 
 // SaveTextDialog shows a native save dialog for exporting as plain text.
+// Default directory is set outside the projects folder.
 func (a *App) SaveTextDialog(suggestedName string) string {
 	if filepath.Ext(suggestedName) == "" {
 		suggestedName += ".txt"
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	opts := runtime.SaveDialogOptions{
 		Title:           "Export as Text",
 		DefaultFilename: suggestedName,
 		Filters: []runtime.FileFilter{
 			{DisplayName: "Text files (*.txt)", Pattern: "*.txt"},
 		},
-	})
+	}
+	if dir := defaultExportDir(); dir != "" {
+		opts.DefaultDirectory = dir
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, opts)
 	if err != nil {
 		log.Printf("save text dialog error: %v", err)
+		return ""
+	}
+	return path
+}
+
+// SaveEPUBDialog shows a native save dialog for exporting as EPUB.
+// Default directory is set outside the projects folder.
+func (a *App) SaveEPUBDialog(suggestedName string) string {
+	if filepath.Ext(suggestedName) == "" {
+		suggestedName += ".epub"
+	}
+	opts := runtime.SaveDialogOptions{
+		Title:           "Export as EPUB",
+		DefaultFilename: suggestedName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "EPUB books (*.epub)", Pattern: "*.epub"},
+		},
+	}
+	if dir := defaultExportDir(); dir != "" {
+		opts.DefaultDirectory = dir
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, opts)
+	if err != nil {
+		log.Printf("save epub dialog error: %v", err)
 		return ""
 	}
 	return path

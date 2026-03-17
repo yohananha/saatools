@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ListProjects, ImportEPUB, ImportProjectFile,
-  DeleteProject, ExportProject, OpenEPUBDialog,
-  OpenProjectDialog, SaveProjectDialog, LoadProject,
-  GetSettings, GetProjectCover,
+  DeleteProject, ExportProject, ExportProjectEPUB, ExportProjectTranslationOnly,
+  SetActiveProject, TranslateWholeBook,
+  OpenEPUBDialog, OpenProjectDialog, SaveProjectDialog, SaveEPUBDialog, SaveTextDialog,
+  LoadProject, GetSettings, SaveSettings, GetProjectCover,
   GetBookDetailsInfo, FetchBookDetails, SaveBookDetailsInfo,
   isWails,
 } from '../api'
@@ -115,6 +116,12 @@ function ImportModal({ onClose, onImported }) {
       toast(`Imported "${info.title || info.name}"`, 'success')
       onImported(info)
       onClose()
+      // Save chosen languages as future defaults (prefill for next import)
+      if (mode === 'epub') {
+        GetSettings()
+          .then(s => SaveSettings({ ...s, sourceLanguage: from, targetLanguage: directRead ? from : to }))
+          .catch(() => {})
+      }
       // Auto-fetch book details for new EPUB imports (fire-and-forget)
       if (mode === 'epub' && info.path) {
         FetchBookDetails(info.path)
@@ -361,9 +368,11 @@ function BookInfoModal({ info, onClose }) {
 }
 
 // ── Book Card ──────────────────────────────────────────────────────────────
-function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
+function BookCard({ info, onOpen, onDelete, onExportSPZ, onExportEPUB, onExportTXT, onTranslateWholeBook, onInfo }) {
   const [dark, light]  = coverColors(info.name)
   const [coverSrc, setCoverSrc] = useState(null)   // null = loading, '' = none, 'data:...' = found
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportRef = useRef(null)
 
   const readPct  = info.total > 0 ? Math.round((info.readAt  / info.total) * 100) : 0
   const transPct = info.total > 0 ? Math.round((info.translated / info.total) * 100) : 0
@@ -378,6 +387,16 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
     })
     return () => { cancelled = true }
   }, [info.path])
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    if (!exportOpen) return
+    const close = (e) => {
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false)
+    }
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [exportOpen])
 
   const hasCover = Boolean(coverSrc)
 
@@ -429,17 +448,55 @@ function BookCard({ info, onOpen, onDelete, onExport, onInfo }) {
         })()}
       </div>
 
-      <div className="book-actions">
+      <div className="book-actions" ref={exportRef}>
         <button
           className="book-action-btn"
           title="Book details"
           onClick={e => { e.stopPropagation(); onInfo(info) }}
         >ℹ</button>
-        <button
-          className="book-action-btn"
-          title="Export / back up"
-          onClick={e => { e.stopPropagation(); onExport(info) }}
-        >⬇</button>
+        {!info.direct && (info.translated ?? 0) < (info.total ?? 1) && (
+          <button
+            className="book-action-btn"
+            title="Translate whole book (runs in background)"
+            onClick={e => { e.stopPropagation(); onTranslateWholeBook(info) }}
+          >🔄</button>
+        )}
+        <div style={{ position: 'relative' }}>
+          <button
+            className="book-action-btn"
+            title="Export"
+            onClick={e => { e.stopPropagation(); setExportOpen(o => !o) }}
+          >⬇</button>
+          {exportOpen && (
+            <div
+              className="export-dropdown"
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: 4,
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                boxShadow: '0 4px 12px rgba(0,0,0,.2)',
+                zIndex: 10,
+                minWidth: 160,
+                padding: 4,
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <button type="button" className="export-dropdown-btn" onClick={() => { onExportSPZ(info); setExportOpen(false) }}>
+                📦 Project (.spz)
+              </button>
+              <button type="button" className="export-dropdown-btn" onClick={() => { onExportEPUB(info); setExportOpen(false) }}>
+                📖 EPUB
+              </button>
+              <button type="button" className="export-dropdown-btn" onClick={() => { onExportTXT(info); setExportOpen(false) }}>
+                📄 Translation (TXT)
+              </button>
+            </div>
+          )}
+        </div>
         <button
           className="book-action-btn"
           title="Delete"
@@ -535,19 +592,61 @@ export default function Library({ onOpenReader }) {
     }
   }
 
-  async function handleExport(info) {
+  const suggestedName = (info) => (info.title || info.name || 'export').replace(/[^\w\s-]/g, '').trim() || 'export'
+
+  async function handleExportSPZ(info) {
     try {
       if (isWails()) {
-        const dest = await SaveProjectDialog(info.name)
+        const dest = await SaveProjectDialog(suggestedName(info))
         if (!dest) return
         await ExportProject(info.path, dest)
       } else {
-        // Web/Android mode: ExportProject triggers a browser download
         await ExportProject(info.path, null)
       }
       toast('Exported successfully', 'success')
     } catch (e) {
       toast(`Export failed: ${e}`, 'error')
+    }
+  }
+
+  async function handleExportEPUB(info) {
+    toast('Exporting EPUB…', 'info')
+    try {
+      if (isWails()) {
+        const dest = await SaveEPUBDialog(suggestedName(info))
+        if (!dest) return
+        await ExportProjectEPUB(info.path, dest)
+      } else {
+        await ExportProjectEPUB(info.path, null)
+      }
+      toast('Exported successfully', 'success')
+    } catch (e) {
+      toast(`Export failed: ${e}`, 'error')
+    }
+  }
+
+  async function handleExportTXT(info) {
+    try {
+      if (isWails()) {
+        const dest = await SaveTextDialog(suggestedName(info))
+        if (!dest) return
+        await ExportProjectTranslationOnly(info.path, dest)
+      } else {
+        await ExportProjectTranslationOnly(info.path, null)
+      }
+      toast('Exported successfully', 'success')
+    } catch (e) {
+      toast(`Export failed: ${e}`, 'error')
+    }
+  }
+
+  async function handleTranslateWholeBook(info) {
+    try {
+      SetActiveProject(info.path)
+      await TranslateWholeBook(info.path)
+      toast('Translating in background. Open another book to stop.', 'success')
+    } catch (e) {
+      toast(`Could not start translation: ${e}`, 'error')
     }
   }
 
@@ -733,7 +832,10 @@ export default function Library({ onOpenReader }) {
               info={p}
               onOpen={handleOpen}
               onDelete={handleDelete}
-              onExport={handleExport}
+              onExportSPZ={handleExportSPZ}
+              onExportEPUB={handleExportEPUB}
+              onExportTXT={handleExportTXT}
+              onTranslateWholeBook={handleTranslateWholeBook}
               onInfo={setBookInfo}
             />
           ))}

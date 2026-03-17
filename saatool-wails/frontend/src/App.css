@@ -398,6 +398,20 @@ html, body, #root {
 }
 .book-action-btn:hover { background: rgba(0,0,0,.8); }
 
+.export-dropdown-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--fg);
+  border-radius: 4px;
+}
+.export-dropdown-btn:hover { background: var(--bg-hover); }
+
 .empty-library {
   flex: 1;
   display: flex; flex-direction: column;

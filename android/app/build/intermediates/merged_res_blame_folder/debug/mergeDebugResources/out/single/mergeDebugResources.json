@@ -4,7 +4,79 @@
         "source": "com.saatool.app-main-22:/mipmap-anydpi-v26/ic_launcher_round.xml"
     },
     {
+        "merged": "com.saatool.app-debug-20:/mipmap-hdpi_ic_launcher_foreground.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-hdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-hdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-mdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxhdpi/ic_launcher_round.png"
+    },
+    {
         "merged": "com.saatool.app-debug-20:/mipmap-anydpi-v26_ic_launcher.xml.flat",
         "source": "com.saatool.app-main-22:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-mdpi_ic_launcher_foreground.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-mdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/xml_network_security_config.xml.flat",
+        "source": "com.saatool.app-main-22:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.saatool.app-main-22:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.saatool.app-main-22:/mipmap-xxxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.saatool.app-debug-20:/drawable-nodpi_ic_launcher_foreground_src.png.flat",
+        "source": "com.saatool.app-main-22:/drawable-nodpi/ic_launcher_foreground_src.png"
     }
 ]

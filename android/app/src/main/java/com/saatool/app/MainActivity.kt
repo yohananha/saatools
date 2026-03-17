@@ -1,11 +1,14 @@
 package com.saatool.app
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import android.view.WindowManager
@@ -19,6 +22,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
 /**
@@ -32,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingSafUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,15 +127,10 @@ class MainActivity : AppCompatActivity() {
                     val escaped = path.replace("\\", "\\\\").replace("'", "\\'")
                     webView.evaluateJavascript("typeof window.onFolderChosen === 'function' && window.onFolderChosen('$escaped');", null)
                 } else {
-                    runOnUiThread {
-                        AlertDialog.Builder(this)
-                            .setMessage("This folder cannot be used. Please choose Downloads or App storage below.")
-                            .setPositiveButton(android.R.string.ok) { _, _ ->
-                                showFolderPresetsFallback()
-                            }
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .show()
-                    }
+                    // Folder path not directly accessible (scoped storage). Store SAF URI and
+                    // use DocumentFile-based writing in saveFile() via the saf://pending/ prefix.
+                    pendingSafUri = treeUri
+                    webView.evaluateJavascript("typeof window.onFolderChosen === 'function' && window.onFolderChosen('saf://pending/');", null)
                 }
             }
         }
@@ -162,40 +162,50 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
-    private fun showFolderPresetsFallback() {
-        val downloadsPath = publicDownloadsPath()
-        val appPath = applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.absolutePath
-            ?: applicationContext.filesDir.absolutePath
-        val items = mutableListOf<Pair<String, String>>()
-        if (downloadsPath != null) items.add("Downloads" to downloadsPath)
-        items.add("App storage" to appPath)
-        val labels = items.map { it.first }.toTypedArray()
-        val paths = items.map { it.second }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Choose folder for books")
-            .setItems(labels) { _, which ->
-                val path = paths.getOrNull(which) ?: return@setItems
-                val escaped = path.replace("\\", "\\\\").replace("'", "\\'")
-                webView.evaluateJavascript("typeof window.onFolderChosen === 'function' && window.onFolderChosen('$escaped');", null)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun publicDownloadsPath(): String? {
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val file = File(dir.absolutePath)
-        return when {
-            file.exists() && file.canWrite() -> file.absolutePath
-            !file.exists() && file.mkdirs() && file.canWrite() -> file.absolutePath
-            else -> null
-        }
-    }
-
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack()
         else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    /**
+     * Write bytes to public Downloads using MediaStore (Android 10+) or direct file write (Android 9-).
+     * MediaStore requires no special permission on any Android version.
+     */
+    private fun saveToDownloads(fileName: String, bytes: ByteArray): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return try {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeTypeFor(fileName))
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return "Cannot create file in Downloads"
+                contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                    ?: return "Cannot open output stream for Downloads"
+                "ok"
+            } catch (e: Exception) {
+                Log.e(TAG, "saveToDownloads (MediaStore) failed: $fileName", e)
+                e.message ?: "Write failed"
+            }
+        }
+        // Android 9 and below: direct write is allowed
+        return try {
+            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            dir.mkdirs()
+            File(dir, fileName).also { it.writeBytes(bytes) }
+            "ok"
+        } catch (e: Exception) {
+            Log.e(TAG, "saveToDownloads (direct) failed: $fileName", e)
+            e.message ?: "Write failed"
+        }
+    }
+
+    private fun mimeTypeFor(fileName: String): String = when {
+        fileName.endsWith(".epub", ignoreCase = true) -> "application/epub+zip"
+        fileName.endsWith(".txt",  ignoreCase = true) -> "text/plain"
+        else -> "application/octet-stream"
     }
 
     inner class WebAppInterface {
@@ -207,17 +217,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** Shows a folder chooser dialog. Defaults to Downloads and App storage presets, with an option to open the system folder picker for other locations. Calls window.onFolderChosen(path). */
+        /**
+         * Shows a folder chooser dialog. "Downloads" uses a special marker so saveFile()
+         * routes through MediaStore (no permission needed on any Android version).
+         * "App storage" uses the app's external files dir. "Choose other…" opens the SAF picker.
+         * Calls window.onFolderChosen(path).
+         */
         @JavascriptInterface
         fun showFolderPresets() {
             runOnUiThread {
-                val downloadsPath = publicDownloadsPath()
                 val appPath = applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.absolutePath
                     ?: applicationContext.filesDir.absolutePath
-                val items = mutableListOf<Pair<String, String?>>()
-                if (downloadsPath != null) items.add("Downloads" to downloadsPath)
-                items.add("App storage" to appPath)
-                items.add("Choose other\u2026" to null)
+                // "downloads://" is a virtual path — saveFile() routes it through MediaStore/direct write.
+                val items = listOf(
+                    "Downloads" to "downloads://",
+                    "App storage" to appPath,
+                    "Choose other\u2026" to null
+                )
                 val labels = items.map { it.first }.toTypedArray()
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Save to")
@@ -230,7 +246,9 @@ class MainActivity : AppCompatActivity() {
                                 null)
                         } else {
                             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-                            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             @Suppress("DEPRECATION")
                             startActivityForResult(intent, FOLDER_PICKER_REQUEST)
                         }
@@ -240,11 +258,46 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** Writes base64-encoded content to a file at the given path. Returns "ok" on success or an error message. Used so EPUB/TXT export can persist files on Android (WebView does not handle &lt;a download&gt;). */
+        /**
+         * Writes base64-encoded content to a file. Returns "ok" or an error message.
+         *
+         * Special path prefixes:
+         *   "downloads://"   — write to public Downloads via MediaStore (Android 10+) or direct (Android 9-)
+         *   "saf://pending/" — write via SAF URI stored from the last folder picker
+         */
         @JavascriptInterface
         fun saveFile(fullPath: String, base64Content: String): String {
+            val bytes = try {
+                Base64.decode(base64Content, Base64.DEFAULT)
+            } catch (e: Exception) {
+                return e.message ?: "Base64 decode failed"
+            }
+
+            if (fullPath.startsWith("downloads://")) {
+                val fileName = fullPath.removePrefix("downloads://").trimStart('/')
+                return saveToDownloads(fileName, bytes)
+            }
+
+            if (fullPath.startsWith("saf://pending/")) {
+                val safUri = pendingSafUri
+                    ?: return "No folder selected via storage picker"
+                val fileName = fullPath.removePrefix("saf://pending/")
+                return try {
+                    val dir = DocumentFile.fromTreeUri(this@MainActivity, safUri)
+                        ?: return "Cannot open selected folder"
+                    dir.findFile(fileName)?.delete()
+                    val newFile = dir.createFile(mimeTypeFor(fileName), fileName)
+                        ?: return "Cannot create file in selected folder"
+                    contentResolver.openOutputStream(newFile.uri)?.use { it.write(bytes) }
+                        ?: return "Cannot write to selected folder"
+                    "ok"
+                } catch (e: Exception) {
+                    Log.e(TAG, "saveFile (SAF) failed: $fullPath", e)
+                    e.message ?: "Write failed"
+                }
+            }
+
             return try {
-                val bytes = Base64.decode(base64Content, Base64.DEFAULT)
                 val file = File(fullPath)
                 file.parentFile?.mkdirs()
                 file.writeBytes(bytes)

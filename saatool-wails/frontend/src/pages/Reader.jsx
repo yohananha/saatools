@@ -192,6 +192,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [translatingSet, setTranslatingSet] = useState(new Set())
+  const [fixInProgressIndex, setFixInProgressIndex] = useState(null) // only set when user tapped Fix (not when para is just untranslated)
   const [isSource,       setIsSource]       = useState(true)
   const [fontSize,       setFontSize]       = useState(18)
   const [showOverlay,    setShowOverlay]    = useState(false)
@@ -459,12 +460,20 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const isTranslating = translatingSet.size > 0
 
   async function handleFix() {
+    toast('Fixing paragraph…', 'info')
+    setFixInProgressIndex(fixIndex)
     setTranslatingSet(s => new Set([...s, fixIndex]))
     try {
       await FixTranslation(project.path, fixIndex)
+      const batch = await GetParagraphsBatch(project.path, pageStart.para, BATCH, isSource)
+      if (batch && batch.length) setParagraphs(batch)
+      setTranslatingSet(s => { const n = new Set(s); n.delete(fixIndex); return n })
+      toast('Paragraph fixed', 'success')
     } catch (e) {
       toast(`Fix failed: ${e}`, 'error')
       setTranslatingSet(s => { const n = new Set(s); n.delete(fixIndex); return n })
+    } finally {
+      setFixInProgressIndex(null)
     }
   }
 
@@ -672,7 +681,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
             <div className="overlay-divider" />
             <div className="overlay-actions">
               {!isDirect && !isSource && (
-                <button className="btn overlay-btn" onClick={handleFix} disabled={isTranslating}>
+                <button
+                  className={`btn overlay-btn${fixInProgressIndex === fixIndex ? ' active' : ''}`}
+                  onClick={handleFix}
+                  disabled={isTranslating}
+                >
                   🔧 Fix
                 </button>
               )}

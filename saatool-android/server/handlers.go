@@ -656,7 +656,7 @@ func (s *Server) handleFixTranslation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fmt.Errorf("index cannot be negative"), http.StatusBadRequest)
 		return
 	}
-	if err := s.app.FixTranslation(body.Path, body.Index); err != nil {
+	if err := s.app.FixTranslationSync(r.Context(), body.Path, body.Index); err != nil {
 		writeErr(w, err, http.StatusInternalServerError)
 		return
 	}

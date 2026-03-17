@@ -106,6 +106,8 @@ type App struct {
 	// ALL TranslateParagraphs invocations, preventing goroutine accumulation when
 	// the user triggers rapid translate-ahead requests.
 	translationSem chan struct{}
+	// fixSem is a dedicated slot for Fix so it runs immediately without waiting behind batch translation.
+	fixSem chan struct{}
 
 	// activeProjectPath is the project currently allowed to run translation (Reader open or whole-book from Library).
 	// SetActiveProject cancels any other project's in-flight translation.
@@ -122,6 +124,7 @@ func newApp(broadcast BroadcastFn) *App {
 		translators:      make(map[string]*ai.Translator),
 		broadcast:        broadcast,
 		translationSem:   make(chan struct{}, config.Options.MaxConcurrentTranslations),
+		fixSem:           make(chan struct{}, 1),
 		projectCancel:    make(map[string]context.CancelFunc),
 	}
 }
@@ -503,14 +506,18 @@ func (a *App) GetParagraphsBatch(projectPath string, fromIndex, count int, isSou
 	return result, nil
 }
 
+// GetLastPosition returns the last saved reading position. If the saved position
+// is 0 and there is translated content, returns the last translated paragraph and
+// target view so the book opens at the end of the translated part.
 func (a *App) GetLastPosition(projectPath string) (Position, error) {
 	p, err := a.getOrLoad(projectPath)
 	if err != nil {
 		return Position{}, err
 	}
+	index, sourceView := p.EffectiveOpenPosition()
 	return Position{
-		Index:      p.LastParagraphIndex,
-		SourceView: p.LastSourceView,
+		Index:      index,
+		SourceView: sourceView,
 	}, nil
 }
 
@@ -753,6 +760,26 @@ func (a *App) FixTranslation(projectPath string, index int) error {
 		}
 	}()
 	return nil
+}
+
+// FixTranslationSync runs the fix in the current goroutine and returns when done.
+// Used by the HTTP handler so the client receives 204 only after the fix completes.
+// It uses fixSem (not translationSem) so Fix runs immediately without waiting behind batch translation.
+func (a *App) FixTranslationSync(ctx context.Context, projectPath string, index int) error {
+	a.mu.Lock()
+	t, ok := a.translators[projectPath]
+	a.mu.Unlock()
+	if !ok {
+		if _, err := a.LoadProject(projectPath); err != nil {
+			return err
+		}
+		a.mu.Lock()
+		t = a.translators[projectPath]
+		a.mu.Unlock()
+	}
+	a.fixSem <- struct{}{}
+	defer func() { <-a.fixSem }()
+	return t.FixTranslation(ctx, index)
 }
 
 // ─── Book details ─────────────────────────────────────────────────────────────

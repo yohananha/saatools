@@ -194,7 +194,10 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   const [translatingSet, setTranslatingSet] = useState(new Set())
   const [fixInProgressIndex, setFixInProgressIndex] = useState(null) // only set when user tapped Fix (not when para is just untranslated)
   const [isSource,       setIsSource]       = useState(true)
-  const [fontSize,       setFontSize]       = useState(18)
+  const [fontSize,       setFontSize]       = useState(() => {
+    const saved = parseInt(localStorage.getItem('babelreader.fontSize'), 10)
+    return (saved >= MIN_FONT && saved <= MAX_FONT) ? saved : 18
+  })
   const [showOverlay,    setShowOverlay]    = useState(false)
   const [showFontPanel,  setShowFontPanel]  = useState(false)
   const [fittingCount,   setFittingCount]   = useState(BATCH)
@@ -330,7 +333,16 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
           const baseOffset = i === 0 ? ps.offset : 0
           next = { para: visibleParagraphs[i].index, offset: baseOffset + charOffset }
         } else {
-          next = { para: visibleParagraphs[i].index, offset: 0 }
+          // caretRangeFromPoint failed; estimate split proportionally so we
+          // always advance rather than looping back to the same position.
+          const rect2 = el.getBoundingClientRect()
+          const fraction = rect2.height > 0
+            ? Math.max(0, Math.min(1, (clipBottom - rect2.top) / rect2.height))
+            : 0
+          const textLen = el.textContent.length
+          const estimated = Math.max(1, Math.floor(fraction * textLen))
+          const baseOffset = i === 0 ? ps.offset : 0
+          next = { para: visibleParagraphs[i].index, offset: baseOffset + estimated }
         }
       }
       break
@@ -451,7 +463,11 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Font size ─────────────────────────────────────────────────────────────
   function adjustFont(delta) {
-    setFontSize(f => Math.min(MAX_FONT, Math.max(MIN_FONT, f + delta)))
+    setFontSize(f => {
+      const next = Math.min(MAX_FONT, Math.max(MIN_FONT, f + delta))
+      localStorage.setItem('babelreader.fontSize', next)
+      return next
+    })
     showOverlayTemporarily()
   }
 

@@ -673,17 +673,16 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 	if total == 0 {
 		return nil
 	}
-	// Block early: if the whole book is already translated, do not start any work.
-	if total <= len(p.Target.Paragraphs) {
-		allDone := true
-		for i := 0; i < total && allDone; i++ {
-			if p.Target.Paragraphs[i].Text == "" {
-				allDone = false
-			}
+	// Find the first untranslated paragraph to use as start index.
+	startIndex := total
+	for i := 0; i < total; i++ {
+		if i >= len(p.Target.Paragraphs) || p.Target.Paragraphs[i].Text == "" {
+			startIndex = i
+			break
 		}
-		if allDone {
-			return nil
-		}
+	}
+	if startIndex == total {
+		return nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -705,7 +704,7 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 			}
 			a.activeMu.Unlock()
 		}()
-		for i := 0; i < total; i += batchSize {
+		for i := startIndex; i < total; i += batchSize {
 			select {
 			case <-ctx.Done():
 				return

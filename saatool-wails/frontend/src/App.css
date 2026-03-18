@@ -149,6 +149,11 @@ html, body, #root {
 .btn.danger { background: var(--danger); color: #fff; }
 .btn.danger:hover { filter: brightness(1.1); }
 .btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+.btn.fixing {
+  background: var(--accent-glow); border-color: var(--accent); color: var(--accent);
+  animation: pulse-fix 1.2s ease-in-out infinite; pointer-events: none;
+}
+@keyframes pulse-fix { 0%,100%{opacity:1} 50%{opacity:.5} }
 .btn.icon-only { padding: 8px; border-radius: 50%; font-size: 16px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 

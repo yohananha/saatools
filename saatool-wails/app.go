@@ -103,6 +103,9 @@ type App struct {
 	// ALL TranslateParagraphs invocations, preventing goroutine accumulation when
 	// the user triggers rapid translate-ahead requests.
 	translationSem chan struct{}
+	// fixSem is a dedicated slot for Fix so it runs immediately without waiting
+	// behind batch translation.
+	fixSem chan struct{}
 
 	activeMu          sync.Mutex
 	activeProjectPath string
@@ -115,6 +118,7 @@ func NewApp() *App {
 		projects:       make(map[string]*translation.Project),
 		translators:    make(map[string]*ai.Translator),
 		translationSem: make(chan struct{}, config.Options.MaxConcurrentTranslations),
+		fixSem:         make(chan struct{}, 1),
 		projectCancel:  make(map[string]context.CancelFunc),
 	}
 }
@@ -506,8 +510,7 @@ func (a *App) ExportProjectEPUB(projectPath, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	cp, _ := coverPathForProject(projectPath)
-	return export.ProjectToEPUB(p, outputPath, cp)
+	return export.ProjectToEPUB(p, outputPath)
 }
 
 // GetLastPosition returns the last saved reading position in a project.
@@ -762,12 +765,11 @@ func (a *App) FixTranslation(projectPath string, index int) error {
 		t = a.translators[projectPath]
 		a.mu.Unlock()
 	}
-	// H-4: Run Fix through the shared semaphore so it competes for API slots
-	// with background translation, preventing unbounded goroutine accumulation.
-	// Semaphore send is inside a goroutine so the Wails call returns immediately.
+	// Use dedicated fixSem so Fix runs immediately without waiting behind
+	// batch translation.  Goroutine so the Wails call returns immediately.
 	go func() {
-		a.translationSem <- struct{}{}
-		defer func() { <-a.translationSem }()
+		a.fixSem <- struct{}{}
+		defer func() { <-a.fixSem }()
 		if err := t.FixTranslation(a.ctx, index); err != nil {
 			log.Printf("fix translation error at %d: %v", index, err)
 		}

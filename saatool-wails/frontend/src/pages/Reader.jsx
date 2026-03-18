@@ -362,6 +362,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   useEffect(() => {
     function onTranslated(ev) {
       if (ev.projectPath !== project.path) return
+      console.log('[Fix] onTranslated event — index=%d, text preview: "%s"', ev.index, (ev.text ?? '').slice(0, 80))
       setParagraphs(ps => ps.map(p =>
         p.index === ev.index ? { ...p, text: ev.text } : p
       ))
@@ -478,22 +479,55 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   }
 
   // ── Fix translation ───────────────────────────────────────────────────────
-  const fixIndex      = paragraphs[0]?.index ?? 0
   const isTranslating = translatingSet.size > 0
 
+  /** Wait for translation:complete events for a set of paragraph indices. */
+  function waitForTranslationEvents(projectPath, indices, timeoutMs = 120_000) {
+    return new Promise((resolve, reject) => {
+      const remaining = new Set(indices)
+      const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')) }, timeoutMs)
+      const cleanup = onTranslationComplete((ev) => {
+        if (ev.projectPath === projectPath && remaining.has(ev.index)) {
+          remaining.delete(ev.index)
+          if (remaining.size === 0) {
+            clearTimeout(timer)
+            cleanup()
+            resolve()
+          }
+        }
+      })
+    })
+  }
+
   async function handleFix() {
-    toast('Fixing paragraph…', 'info')
-    setFixInProgressIndex(fixIndex)
-    setTranslatingSet(s => new Set([...s, fixIndex]))
+    // Fix all paragraphs currently visible on screen.
+    const visible = visibleParagraphs.slice(0, fittingCount)
+    const fixIndices = visible.map(p => p.index)
+    console.log('[Fix] fixing %d visible paragraphs: %s', fixIndices.length, JSON.stringify(fixIndices))
+
+    toast(`Fixing ${fixIndices.length} paragraph${fixIndices.length > 1 ? 's' : ''}…`, 'info')
+    setFixInProgressIndex(fixIndices[0])
+    setTranslatingSet(s => new Set([...s, ...fixIndices]))
+
+    // Fire all fix requests.
     try {
-      await FixTranslation(project.path, fixIndex)
-      const batch = await GetParagraphsBatch(project.path, pageStart.para, BATCH, isSource)
-      if (batch && batch.length) setParagraphs(batch)
-      setTranslatingSet(s => { const n = new Set(s); n.delete(fixIndex); return n })
-      toast('Paragraph fixed', 'success')
+      await Promise.all(fixIndices.map(idx => FixTranslation(project.path, idx)))
     } catch (e) {
+      console.error('[Fix] FixTranslation threw:', e)
       toast(`Fix failed: ${e}`, 'error')
-      setTranslatingSet(s => { const n = new Set(s); n.delete(fixIndex); return n })
+      setTranslatingSet(s => { const n = new Set(s); fixIndices.forEach(i => n.delete(i)); return n })
+      setFixInProgressIndex(null)
+      return
+    }
+
+    // Wait for all backend events — the useEffect listener updates paragraphs & translatingSet.
+    try {
+      await waitForTranslationEvents(project.path, fixIndices, 120_000)
+      toast(`${fixIndices.length} paragraph${fixIndices.length > 1 ? 's' : ''} fixed`, 'success')
+    } catch (e) {
+      console.error('[Fix] wait failed:', e)
+      toast('Fix timed out or failed', 'error')
+      setTranslatingSet(s => { const n = new Set(s); fixIndices.forEach(i => n.delete(i)); return n })
     } finally {
       setFixInProgressIndex(null)
     }
@@ -707,11 +741,13 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
             <div className="overlay-actions">
               {!isDirect && !isSource && (
                 <button
-                  className={`btn overlay-btn${fixInProgressIndex === fixIndex ? ' active' : ''}`}
+                  className={`btn overlay-btn${fixInProgressIndex != null ? ' fixing' : ''}`}
                   onClick={handleFix}
                   disabled={isTranslating}
                 >
-                  🔧 Fix
+                  {fixInProgressIndex != null
+                    ? <><span className="spinner" style={{width:14,height:14,display:'inline-block',verticalAlign:'middle',marginRight:4}}/> Fixing…</>
+                    : '🔧 Fix'}
                 </button>
               )}
               {!isDirect && bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}

@@ -129,7 +129,7 @@ gradlew assembleRelease
 | **EPUB import** | Import any EPUB for translation or direct reading |
 | **Direct read** | Import with "Read as-is" — no translation, no language fields |
 | **AI translation** | Paragraph-by-paragraph via DeepSeek API (batch of 5) |
-| **Proofread / Fix** | Post-process translations with a second AI pass |
+| **Proofread / Fix** | Re-translate all visible paragraphs with a second AI pass; spinner shown while in progress |
 | **Bookmarks** | Named bookmarks per book, accessible from the reader overlay |
 | **Glossary** | Per-book glossary with tap-to-lookup in reader |
 | **Reading position** | Book reopens at the last read paragraph |

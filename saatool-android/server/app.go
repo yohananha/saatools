@@ -433,8 +433,7 @@ func (a *App) WriteEPUBTo(projectPath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cp, _ := coverPathForProject(projectPath)
-	return export.ProjectToEPUBWriter(p, w, cp)
+	return export.ProjectToEPUBWriter(p, w)
 }
 
 // WriteTranslationOnlyTo writes only the target paragraphs to w (plain text).

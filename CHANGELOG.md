@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-03-18
+
+### Added
+- **Fix all visible paragraphs** — tapping Fix now fixes every paragraph currently visible on the page (not just the first). All fix requests fire in parallel and the button shows a spinner until every paragraph completes.
+
+### Changed
+- **Fix uses dedicated semaphore** (`fixSem`) — Fix no longer competes for slots with background batch translation, so it starts immediately even when translation is running.
+
+### Fixed
+- **Fix button showed "pressed" state permanently** — the button used `.active` (solid accent fill, no animation) even while idle; replaced with `.fixing` which is only applied while the fix is in progress.
+- **No visual feedback during fix** — button now shows a spinner and "Fixing…" label while waiting, and pulses via `@keyframes pulse-fix` so it's clear the request is in flight.
+- **Fix applied result to wrong paragraph** — `fixIndex` was derived from `paragraphs[0]?.index`, which could be stale when the batch hadn't refreshed yet after navigation. Index is now taken directly from the live `visibleParagraphs` slice, which is always in sync with the current page.
+
+---
+
 ## [Unreleased] — 2026-03-15
 
 ### Added

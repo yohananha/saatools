@@ -746,42 +746,48 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
             </div>
             <div className="overlay-divider" />
             <div className="overlay-actions">
-              {!isDirect && !isSource && (
-                <button
-                  className={`btn overlay-btn${fixInProgressIndex != null ? ' fixing' : ''}`}
-                  onClick={handleFix}
-                  disabled={isTranslating}
-                >
-                  {fixInProgressIndex != null
-                    ? <><span className="spinner" style={{width:14,height:14,display:'inline-block',verticalAlign:'middle',marginRight:4}}/> Fixing…</>
-                    : '🔧 Fix'}
-                </button>
-              )}
-              {!isDirect && bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
+              {/* Tool group */}
               {!isDirect && (
-                <button className="btn overlay-btn" onClick={handleExportEPUB} title="Export as EPUB">
-                  📖 EPUB
-                </button>
+                <div className="overlay-pill-group">
+                  {!isSource && (
+                    <button
+                      className={`btn overlay-btn${fixInProgressIndex != null ? ' fixing' : ''}`}
+                      onClick={handleFix}
+                      disabled={isTranslating}
+                    >
+                      {fixInProgressIndex != null
+                        ? <><span className="spinner" style={{width:14,height:14,display:'inline-block',verticalAlign:'middle',marginRight:4}}/> Fixing…</>
+                        : '🔧 Fix'}
+                    </button>
+                  )}
+                  {bookDone && <button className="btn overlay-btn" onClick={handleSave}>💾 Save</button>}
+                  <button className="btn overlay-btn" onClick={handleExportEPUB} title="Export as EPUB">
+                    📖 EPUB
+                  </button>
+                </div>
               )}
-              <button
-                className={`btn overlay-btn${pageBookmark ? ' active' : ''}`}
-                onClick={openBookmarkModal}
-                title={pageBookmark ? 'Edit bookmark' : 'Add bookmark'}
-              >
-                🔖{pageBookmark ? ' ✓' : ''}
-              </button>
-              {bookmarks.length > 0 && (
+              {/* Bookmark + glossary group */}
+              <div className="overlay-pill-group">
+                <button
+                  className={`btn overlay-btn${pageBookmark ? ' active' : ''}`}
+                  onClick={openBookmarkModal}
+                  title={pageBookmark ? 'Edit bookmark' : 'Add bookmark'}
+                >
+                  🔖{pageBookmark ? ' ✓' : ''}
+                </button>
+                {bookmarks.length > 0 && (
+                  <button className="btn overlay-btn"
+                    onClick={() => { setShowOverlay(false); setShowBookmarkList(true) }}
+                    title="All bookmarks">
+                    📑 {bookmarks.length}
+                  </button>
+                )}
                 <button className="btn overlay-btn"
-                  onClick={() => { setShowOverlay(false); setShowBookmarkList(true) }}
-                  title="All bookmarks">
-                  📑 {bookmarks.length}
+                  onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
+                  title="Glossary">
+                  📖{Object.keys(glossary).length > 0 ? ` ${Object.keys(glossary).length}` : ''}
                 </button>
-              )}
-              <button className="btn overlay-btn"
-                onClick={() => { setShowOverlay(false); setShowGlossaryList(true) }}
-                title="Glossary">
-                📖{Object.keys(glossary).length > 0 ? ` ${Object.keys(glossary).length}` : ''}
-              </button>
+              </div>
             </div>
           </div>
         )}

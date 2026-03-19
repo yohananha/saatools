@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-03-19
+
+### Added
+- **Library search bar** — text input in the search+filter row; filters by title, name, author, and genre in real time.
+- **Reader overlay — grouped pill buttons** — action buttons are now grouped into two pill clusters (Fix/Save/EPUB and Bookmark/Glossary) with a shared background and internal dividers, preventing overflow on narrow screens.
+
+### Changed
+- **Nav bar — divider + labeled theme button** — a thin vertical divider now visually separates the Library/Settings tabs from a compact theme toggle button that shows the icon and a "Light"/"Dark" label. This makes clear it's a utility control, not a third tab.
+- **Export dropdown — positioned inside book card** — the dropdown is now anchored to the book card (`left: 6px; right: 6px; top: 32px`) instead of the small action button, so it can never overflow the card boundaries.
+- **Book action buttons — semi-visible on touch** — base opacity raised to `0.45` on touch devices (`@media (hover: hover)` resets to `0` for pointer devices) so the buttons are discoverable without a hover state.
+- **Search + filter — joined capsule row** — search input and filter button share a single pill-shaped container; filter label hides on screens narrower than 400 px (icon-only with badge).
+
+### Fixed
+- **Export dropdown — transparent background** — was using undefined `--bg-elevated`; replaced with `--bg-card`.
+- **Export dropdown hover color** — was using undefined `--bg-hover`; replaced with `--btn-hover`.
+
+---
+
 ## [Unreleased] — 2026-03-18
 
 ### Added

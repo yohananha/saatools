@@ -460,42 +460,11 @@ function BookCard({ info, onOpen, onDelete, onExportSPZ, onExportEPUB, onExportT
             onClick={e => { e.stopPropagation(); onTranslateWholeBook(info) }}
           >🔄</button>
         )}
-        <div style={{ position: 'relative' }}>
-          <button
-            className="book-action-btn"
-            title="Export"
-            onClick={e => { e.stopPropagation(); setExportOpen(o => !o) }}
-          >⬇</button>
-          {exportOpen && (
-            <div
-              className="export-dropdown"
-              style={{
-                position: 'absolute',
-                top: '100%',
-                right: 0,
-                marginTop: 4,
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                boxShadow: '0 4px 12px rgba(0,0,0,.2)',
-                zIndex: 10,
-                minWidth: 160,
-                padding: 4,
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              <button type="button" className="export-dropdown-btn" onClick={() => { onExportSPZ(info); setExportOpen(false) }}>
-                📦 Project (.spz)
-              </button>
-              <button type="button" className="export-dropdown-btn" onClick={() => { onExportEPUB(info); setExportOpen(false) }}>
-                📖 EPUB
-              </button>
-              <button type="button" className="export-dropdown-btn" onClick={() => { onExportTXT(info); setExportOpen(false) }}>
-                📄 Translation (TXT)
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          className="book-action-btn"
+          title="Export"
+          onClick={e => { e.stopPropagation(); setExportOpen(o => !o) }}
+        >⬇</button>
         <button
           className="book-action-btn"
           title="Delete"
@@ -503,6 +472,23 @@ function BookCard({ info, onOpen, onDelete, onExportSPZ, onExportEPUB, onExportT
           onClick={e => { e.stopPropagation(); onDelete(info) }}
         >✕</button>
       </div>
+
+      {exportOpen && (
+        <div
+          className="export-dropdown"
+          onClick={e => e.stopPropagation()}
+        >
+          <button type="button" className="export-dropdown-btn" onClick={() => { onExportSPZ(info); setExportOpen(false) }}>
+            📦 Project (.spz)
+          </button>
+          <button type="button" className="export-dropdown-btn" onClick={() => { onExportEPUB(info); setExportOpen(false) }}>
+            📖 EPUB
+          </button>
+          <button type="button" className="export-dropdown-btn" onClick={() => { onExportTXT(info); setExportOpen(false) }}>
+            📄 Translation (TXT)
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -514,6 +500,7 @@ export default function Library({ onOpenReader }) {
   const [showImport,   setShowImport]   = useState(false)
   const [confirmDel,   setConfirmDel]   = useState(null)   // ProjectInfo | null
   const [bookInfo,     setBookInfo]     = useState(null)   // ProjectInfo | null
+  const [searchQuery,  setSearchQuery]  = useState('')
   const [filterOpen,   setFilterOpen]   = useState(false)
   const [filters,      setFilters]      = useState(() => {
     try {
@@ -681,6 +668,11 @@ export default function Library({ onOpenReader }) {
 
   const visibleProjects = projects
     .filter(p => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        const haystack = [p.title, p.name, p.author, p.genre].filter(Boolean).join(' ').toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
       if (filters.readStatuses.size  && !filters.readStatuses.has(readStatus(p)))   return false
       if (filters.transStatuses.size && !filters.transStatuses.has(transStatus(p))) return false
       if (filters.authors.size && p.author && !filters.authors.has(p.author)) return false
@@ -710,21 +702,31 @@ export default function Library({ onOpenReader }) {
       </div>
 
       {projects.length > 0 && (
-        <div className="library-filters">
-          <button
-            className={`filter-toggle-btn${isFilterActive ? ' active' : ''}`}
-            onClick={() => setFilterOpen(o => !o)}
-          >
-            <svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor" aria-hidden="true">
-              <path d="M0 0h13v1.8L8 6v5l-3-1.5V6L0 1.8z"/>
-            </svg>
-            Filters
-            {isFilterActive && (
-              <span className="filter-badge">
-                {filters.readStatuses.size + filters.transStatuses.size + filters.authors.size + filters.genres.size + filters.styles.size}
-              </span>
-            )}
-          </button>
+        <div className="library-search-row">
+          <div className="search-filter-capsule">
+            <span className="search-icon">🔍</span>
+            <input
+              className="library-search-input"
+              type="text"
+              placeholder="Search..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            <button
+              className={`filter-toggle-btn${isFilterActive ? ' active' : ''}`}
+              onClick={() => setFilterOpen(o => !o)}
+            >
+              <svg width="13" height="11" viewBox="0 0 13 11" fill="currentColor" aria-hidden="true">
+                <path d="M0 0h13v1.8L8 6v5l-3-1.5V6L0 1.8z"/>
+              </svg>
+              <span className="filter-label">Filters</span>
+              {isFilterActive && (
+                <span className="filter-badge">
+                  {filters.readStatuses.size + filters.transStatuses.size + filters.authors.size + filters.genres.size + filters.styles.size}
+                </span>
+              )}
+            </button>
+          </div>
           {isFilterActive && (
             <button className="filter-clear-btn" onClick={clearFilters}>✕ Clear</button>
           )}

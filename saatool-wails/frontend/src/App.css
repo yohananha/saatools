@@ -80,14 +80,13 @@ html, body, #root {
 .bottom-nav {
   display: flex;
   align-items: stretch;
-  padding: 6px 12px;
+  padding: 6px 6px 6px 12px;
   background: var(--nav-bg);
   border-top: 1px solid var(--nav-border);
   flex-shrink: 0;
 }
 
-/* All three nav items (Library, Settings, theme toggle) share this base */
-.nav-tab, .theme-btn {
+.nav-tab {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -105,13 +104,39 @@ html, body, #root {
   font-weight: 500;
   transition: color var(--transition), background var(--transition);
 }
-.nav-tab:hover, .theme-btn:hover { background: var(--btn); color: var(--fg); }
+.nav-tab:hover { background: var(--btn); color: var(--fg); }
 .nav-tab.active { color: var(--accent); }
 .nav-tab .nav-icon { font-size: 20px; line-height: 1; }
 
-.nav-spacer { display: none; }
+.nav-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: var(--border);
+}
 
-.theme-btn { font-size: 20px; }
+.theme-btn {
+  flex: none;
+  width: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  margin-right: 2px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  transition: color var(--transition), background var(--transition);
+}
+.theme-btn:hover { background: var(--btn); color: var(--fg); }
+.theme-btn .nav-icon { font-size: 16px; line-height: 1; }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
@@ -171,6 +196,57 @@ html, body, #root {
   gap: 8px;
   padding: 12px 24px 0;
   flex-wrap: wrap;
+}
+
+/* ── Search + Filter row ─────────────────────────────────────────────── */
+.library-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px 0;
+}
+.search-filter-capsule {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+  transition: border-color var(--transition);
+}
+.search-filter-capsule:focus-within {
+  border-color: var(--accent);
+}
+.search-icon {
+  padding-left: 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.library-search-input {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 8px 8px 8px 6px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg);
+  outline: none;
+  min-width: 0;
+}
+.library-search-input::placeholder {
+  color: var(--fg-subtle);
+}
+.search-filter-capsule .filter-toggle-btn {
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 7px 14px;
+  background: none;
+}
+@media (max-width: 400px) {
+  .filter-label { display: none; }
+  .search-filter-capsule .filter-toggle-btn { padding: 7px 10px; }
 }
 /* ── Filter toggle button ─────────────────────────────────────────────── */
 .filter-toggle-btn {
@@ -386,10 +462,13 @@ html, body, #root {
   position: absolute;
   top: 6px; right: 6px;
   display: flex; flex-direction: column; gap: 4px;
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity var(--transition);
 }
 .book-card:hover .book-actions { opacity: 1; }
+@media (hover: hover) {
+  .book-actions { opacity: 0; }
+}
 
 .book-action-btn {
   width: 26px; height: 26px;
@@ -403,6 +482,19 @@ html, body, #root {
 }
 .book-action-btn:hover { background: rgba(0,0,0,.8); }
 
+.export-dropdown {
+  position: absolute;
+  top: 32px;
+  left: 6px;
+  right: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  z-index: 10;
+  padding: 4px;
+}
+
 .export-dropdown-btn {
   display: block;
   width: 100%;
@@ -415,7 +507,7 @@ html, body, #root {
   color: var(--fg);
   border-radius: 4px;
 }
-.export-dropdown-btn:hover { background: var(--bg-hover); }
+.export-dropdown-btn:hover { background: var(--btn-hover); }
 
 .empty-library {
   flex: 1;
@@ -735,11 +827,27 @@ html, body, #root {
 }
 
 .overlay-actions {
-  display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   flex: 1; justify-content: flex-end;
 }
 .overlay-actions .btn, .overlay-btn {
   padding: 5px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0;
+}
+.overlay-pill-group {
+  display: inline-flex;
+  background: var(--btn);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.overlay-pill-group .overlay-btn {
+  border-radius: 0;
+  background: none;
+}
+.overlay-pill-group .overlay-btn:hover {
+  background: var(--btn-hover);
+}
+.overlay-pill-group .overlay-btn + .overlay-btn {
+  border-left: 1px solid var(--border);
 }
 
 /* ── Settings ────────────────────────────────────────────────────────── */

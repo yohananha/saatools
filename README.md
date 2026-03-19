@@ -134,7 +134,8 @@ gradlew assembleRelease
 | **Glossary** | Per-book glossary with tap-to-lookup in reader |
 | **Reading position** | Book reopens at the last read paragraph |
 | **Dual progress bar** | Separate reading progress (green) and translation progress (accent) |
-| **Library filters** | Filter by status, author, genre, writing style; genre tags auto-merged |
+| **Library search** | Real-time text search across title, author, and genre |
+| **Library filters** | Filter by status, author, genre, writing style; genre tags auto-merged; filter button shows active-count badge |
 | **Book details** | AI-assisted fetch of author, genre, synopsis, characters |
 | **Export** | Export as EPUB (translation + metadata), as project (.spz), or translation-only (.txt). On Android, export shows a folder picker and saves the file to the chosen location (Downloads or app storage). |
 | **Dark / light mode** | Persistent theme toggle in nav bar |

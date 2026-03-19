@@ -106,9 +106,10 @@ export default function App() {
             {tab.label}
           </button>
         ))}
-        <div className="nav-spacer" />
+        <div className="nav-divider" />
         <button className="theme-btn" onClick={toggleTheme} title="Toggle theme">
-          {theme === 'dark' ? '☀️' : '🌙'}
+          <span className="nav-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
+          {theme === 'dark' ? 'Light' : 'Dark'}
         </button>
       </nav>
 

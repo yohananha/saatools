@@ -46,3 +46,10 @@ func Start(port int, filesDir string, defaultProjectsDir string) (*Server, error
 func (s *Server) Stop() {
 	s.srv.Shutdown()
 }
+
+// GetToken returns the per-process API secret. The Android host app must
+// inject this into the WebView URL so the frontend can authenticate all
+// API and WebSocket requests.
+func (s *Server) GetToken() string {
+	return s.srv.Token()
+}

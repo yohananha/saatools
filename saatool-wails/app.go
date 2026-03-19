@@ -380,7 +380,7 @@ func (a *App) GetParagraphsBatch(projectPath string, fromIndex, count int, isSou
 		// Always read source para — it carries IsChapterStart for all modes.
 		srcPara, sErr := p.GetSourceParagraph(i)
 		if sErr != nil {
-			continue
+			return nil, fmt.Errorf("failed to read source paragraph %d: %w", i, sErr)
 		}
 
 		var text string
@@ -643,13 +643,14 @@ func (a *App) TranslateWholeBook(projectPath string) error {
 			for j := range indices {
 				indices[j] = i + j
 			}
+			wbSem := a.translationSem
 			select {
 			case <-ctx.Done():
 				return
-			case a.translationSem <- struct{}{}:
+			case wbSem <- struct{}{}:
 			}
 			func(batch []int) {
-				defer func() { <-a.translationSem }()
+				defer func() { <-wbSem }()
 				if err := t.TranslateAndProofReadBatch(ctx, batch); err != nil && !errors.Is(err, context.Canceled) {
 					log.Printf("whole-book batch error (%v): %v", batch, err)
 				}
@@ -708,15 +709,16 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 			}
 			a.activeMu.Unlock()
 		}()
+		sem := a.translationSem
 		select {
 		case <-ctx.Done():
 			return
-		case a.translationSem <- struct{}{}:
+		case sem <- struct{}{}:
 		}
 		if err := t.Translate(ctx, fromIndex); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("translation error (current %d): %v", fromIndex, err)
 		}
-		<-a.translationSem
+		<-sem
 
 		batchSize := config.Options.TranslationBatchSize
 		if batchSize < 1 {
@@ -736,13 +738,14 @@ func (a *App) TranslateParagraphs(projectPath string, fromIndex int) error {
 			for j := range indices {
 				indices[j] = i + j
 			}
+			batchSem := a.translationSem
 			select {
 			case <-ctx.Done():
 				return
-			case a.translationSem <- struct{}{}:
+			case batchSem <- struct{}{}:
 			}
 			go func(batch []int) {
-				defer func() { <-a.translationSem }()
+				defer func() { <-batchSem }()
 				if err := t.TranslateAndProofReadBatch(ctx, batch); err != nil && !errors.Is(err, context.Canceled) {
 					log.Printf("batch translation error (%v): %v", batch, err)
 				}
@@ -817,6 +820,9 @@ func (a *App) FetchBookDetails(projectPath string) (*BookDetailsInfo, error) {
 	}
 	if t == nil {
 		return nil, fmt.Errorf("could not create translator — check API key in Settings")
+	}
+	if p == nil {
+		return nil, fmt.Errorf("project not loaded")
 	}
 
 	bookDetails, err := t.GetBookDetails(a.ctx)
@@ -1126,6 +1132,10 @@ func extractCoverFromEPUB(epubPath string) ([]byte, string) {
 	if err := xml.Unmarshal(opfData, &pkg); err != nil {
 		return nil, ""
 	}
+	const maxManifestItems = 10_000
+	if len(pkg.Manifest.Items) > maxManifestItems {
+		return nil, ""
+	}
 
 	// 3. Find cover item ID from <meta name="cover" content="...">  (EPUB2)
 	var coverID string
@@ -1258,8 +1268,9 @@ func (a *App) SaveSettings(s Settings) error {
 	config.Options.TranslationBatchSize = s.TranslationBatchSize
 	config.Options.ProjectsDirectory = strings.TrimSpace(s.ProjectsDirectory)
 	// Recreate semaphore when concurrency changes so new batches respect the
-	// new limit immediately. Old goroutines hold the previous channel reference
-	// and will release their tokens to it safely; the old channel is then GC'd.
+	// new limit immediately. Each acquire site captures the channel in a local
+	// variable before sending, so in-flight goroutines always release to the
+	// same channel they acquired from; the old channel is then GC'd.
 	if cap(a.translationSem) != s.MaxConcurrentTranslations {
 		a.mu.Lock()
 		a.translationSem = make(chan struct{}, s.MaxConcurrentTranslations)

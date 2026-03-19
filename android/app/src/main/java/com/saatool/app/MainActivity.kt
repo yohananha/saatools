@@ -1,6 +1,5 @@
 package com.saatool.app
 
-import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
@@ -18,12 +17,14 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
+import org.json.JSONObject
 
 /**
  * MainActivity — hosts a full-screen WebView that loads the React frontend
@@ -37,6 +38,41 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingSafUri: Uri? = null
+
+    // Modern ActivityResult API replacements for the deprecated onActivityResult pattern.
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val results = if (result.resultCode == RESULT_OK)
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        else null
+        filePathCallback?.onReceiveValue(results)
+        filePathCallback = null
+    }
+
+    private val folderPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data?.data != null) {
+            val treeUri = result.data!!.data!!
+            try {
+                contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (_: SecurityException) { }
+            val path = treeUriToPath(treeUri)
+            if (path != null) {
+                val quoted = JSONObject.quote(path)
+                webView.evaluateJavascript(
+                    "typeof window.onFolderChosen === 'function' && window.onFolderChosen($quoted);", null)
+            } else {
+                pendingSafUri = treeUri
+                webView.evaluateJavascript(
+                    "typeof window.onFolderChosen === 'function' && window.onFolderChosen('saf://pending/');", null)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +102,10 @@ class MainActivity : AppCompatActivity() {
                 setSupportZoom(false)
                 builtInZoomControls = false
                 displayZoomControls = false
+                // Frontend is embedded and served from localhost — never cache it.
+                // Stale cache causes old JS (without auth token code) to be served
+                // after an APK update, breaking the token handshake.
+                cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
             }
 
             webViewClient = object : WebViewClient() {
@@ -92,7 +132,7 @@ class MainActivity : AppCompatActivity() {
                     filePathCallback = callback
 
                     val intent = params.createIntent()
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST)
+                    fileChooserLauncher.launch(intent)
                     return true
                 }
             }
@@ -100,42 +140,21 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(webView)
 
-        // Give the Go server ~1.5 s to bind to the port, then load the app.
-        webView.postDelayed({
-            Log.i(TAG, "Loading http://localhost:${GoServerService.SERVER_PORT}/")
-            webView.loadUrl("http://localhost:${GoServerService.SERVER_PORT}/")
-        }, 1500)
+        // Poll until the Go server has set its token, then load the app.
+        // A fixed delay is unreliable — on slow devices the server may not have
+        // written serverToken yet. We check every 300 ms; typical startup is <1 s.
+        webView.postDelayed(::loadWebViewWhenReady, 300)
     }
 
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == FILE_CHOOSER_REQUEST) {
-            val results = if (resultCode == Activity.RESULT_OK)
-                WebChromeClient.FileChooserParams.parseResult(resultCode, data)
-            else null
-            filePathCallback?.onReceiveValue(results)
-            filePathCallback = null
-        } else if (requestCode == FOLDER_PICKER_REQUEST) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                val treeUri = data.data!!
-                try {
-                    contentResolver.takePersistableUriPermission(treeUri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                } catch (_: SecurityException) { }
-                val path = treeUriToPath(treeUri)
-                if (path != null) {
-                    val escaped = path.replace("\\", "\\\\").replace("'", "\\'")
-                    webView.evaluateJavascript("typeof window.onFolderChosen === 'function' && window.onFolderChosen('$escaped');", null)
-                } else {
-                    // Folder path not directly accessible (scoped storage). Store SAF URI and
-                    // use DocumentFile-based writing in saveFile() via the saf://pending/ prefix.
-                    pendingSafUri = treeUri
-                    webView.evaluateJavascript("typeof window.onFolderChosen === 'function' && window.onFolderChosen('saf://pending/');", null)
-                }
-            }
+    private fun loadWebViewWhenReady() {
+        val token = GoServerService.serverToken
+        if (token.isEmpty()) {
+            webView.postDelayed(::loadWebViewWhenReady, 300)
+            return
         }
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
+        val url = "http://localhost:${GoServerService.SERVER_PORT}/?appToken=${token}"
+        Log.i(TAG, "Loading http://localhost:${GoServerService.SERVER_PORT}/?appToken=***")
+        webView.loadUrl(url)
     }
 
     private fun treeUriToPath(uri: Uri): String? {
@@ -240,17 +259,16 @@ class MainActivity : AppCompatActivity() {
                     .setItems(labels) { _, which ->
                         val chosen = items.getOrNull(which) ?: return@setItems
                         if (chosen.second != null) {
-                            val escaped = chosen.second!!.replace("\\", "\\\\").replace("'", "\\'")
+                            val quoted = JSONObject.quote(chosen.second!!)
                             webView.evaluateJavascript(
-                                "typeof window.onFolderChosen === 'function' && window.onFolderChosen('$escaped');",
+                                "typeof window.onFolderChosen === 'function' && window.onFolderChosen($quoted);",
                                 null)
                         } else {
                             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
                             intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                            @Suppress("DEPRECATION")
-                            startActivityForResult(intent, FOLDER_PICKER_REQUEST)
+                            folderPickerLauncher.launch(intent)
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)
@@ -299,6 +317,14 @@ class MainActivity : AppCompatActivity() {
 
             return try {
                 val file = File(fullPath)
+                val canonical = file.canonicalPath
+                // Block known dangerous system paths. Android's permission model prevents
+                // writes outside the app's permitted storage at the OS level anyway, but
+                // this stops obviously hostile paths from even being attempted.
+                val blocked = listOf("/proc/", "/sys/", "/dev/", "/system/", "/vendor/", "/etc/")
+                if (blocked.any { canonical.startsWith(it) }) {
+                    return "Path not allowed"
+                }
                 file.parentFile?.mkdirs()
                 file.writeBytes(bytes)
                 "ok"
@@ -311,7 +337,5 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        private const val FILE_CHOOSER_REQUEST = 1001
-        private const val FOLDER_PICKER_REQUEST = 1002
     }
 }

@@ -243,11 +243,18 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
     }
   }, [project.path])
 
-  // ── Reset session counters when project changes ───────────────────────────
+  // ── Reset session counters and open modals when project changes ──────────
   useEffect(() => {
     translatedInSession.current = 0
     setTranslatedCount(project.translated ?? 0)
-  }, [project.path, project.translated])
+    setGlossaryModal(null)
+    setBookmarkModal(null)
+  }, [project.path])
+
+  // ── Keep displayed translated count in sync with parent ──────────────────
+  useEffect(() => {
+    setTranslatedCount(project.translated ?? 0)
+  }, [project.translated])
 
   // ── Load last saved position on mount ────────────────────────────────────
   useEffect(() => {

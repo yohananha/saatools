@@ -18,16 +18,28 @@ const BASE = 'http://localhost:8766'
 export const isWails = () =>
   typeof window !== 'undefined' && window.go != null
 
+// Per-process API token injected into the URL by MainActivity (?appToken=…).
+// Empty string on Wails desktop (token not used there).
+const appToken = (typeof window !== 'undefined')
+  ? (new URLSearchParams(window.location.search).get('appToken') || '')
+  : ''
+
+// Builds a headers object that always includes X-App-Token when available.
+function apiHeaders(extra = {}) {
+  return appToken ? { ...extra, 'X-App-Token': appToken } : extra
+}
+
 // ── Internal fetch helper ─────────────────────────────────────────────────
 // DELETE requests with a body use POST internally for broader compatibility.
 
 async function apiFetch(method, path, body) {
   const isFormData = body instanceof FormData
+  const headers = apiHeaders(
+    body && !isFormData ? { 'Content-Type': 'application/json', 'X-HTTP-Method': method } : {}
+  )
   const res = await fetch(BASE + path, {
     method: method === 'DELETE' ? 'POST' : method,
-    headers: body && !isFormData
-      ? { 'Content-Type': 'application/json', 'X-HTTP-Method': method }
-      : {},
+    headers,
     body: body
       ? (isFormData ? body : JSON.stringify(body))
       : undefined,
@@ -121,7 +133,7 @@ function filenameFromContentDisposition(disp, defaultName) {
  */
 async function exportDownload(exportPath, defaultFilename) {
   const url = BASE + exportPath
-  const res = await fetch(url)
+  const res = await fetch(url, { headers: apiHeaders() })
   if (!res.ok) {
     const text = await res.text().catch(() => '') || res.statusText
     throw new Error(text || 'Export failed')
@@ -157,7 +169,7 @@ function blobToBase64(blob) {
 async function exportEpubPost(path) {
   const res = await fetch(BASE + '/api/projects/export-epub', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path }),
   })
   if (!res.ok) {
@@ -183,7 +195,7 @@ async function exportEpubToAndroid(path) {
   if (!dir) return // user cancelled
   const res = await fetch(BASE + '/api/projects/export-epub', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path }),
   })
   if (!res.ok) {
@@ -204,7 +216,7 @@ async function exportEpubToAndroid(path) {
 async function exportProjectToAndroid(path) {
   const dir = await chooseFolderOnAndroid()
   if (!dir) return
-  const res = await fetch(BASE + `/api/projects/export?path=${encodeURIComponent(path)}`)
+  const res = await fetch(BASE + `/api/projects/export?path=${encodeURIComponent(path)}`, { headers: apiHeaders() })
   if (!res.ok) {
     const text = await res.text().catch(() => '') || res.statusText
     throw new Error(text || 'Export failed')
@@ -242,7 +254,7 @@ export const ExportProjectEPUB = (path, destPath) => {
 async function exportTxtToAndroid(path) {
   const dir = await chooseFolderOnAndroid()
   if (!dir) return
-  const res = await fetch(BASE + `/api/projects/export-txt?path=${encodeURIComponent(path)}`)
+  const res = await fetch(BASE + `/api/projects/export-txt?path=${encodeURIComponent(path)}`, { headers: apiHeaders() })
   if (!res.ok) {
     const text = await res.text().catch(() => '') || res.statusText
     throw new Error(text || 'Export failed')
@@ -390,7 +402,7 @@ export function onTranslationComplete(handler) {
 
   function connect() {
     if (stopped) return
-    ws = new WebSocket(`ws://localhost:8766/ws/events`)
+    ws = new WebSocket(`ws://localhost:8766/ws/events${appToken ? '?token=' + appToken : ''}`)
     ws.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data)

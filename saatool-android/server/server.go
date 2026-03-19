@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -129,10 +132,14 @@ func securityHeaders(next http.Handler) http.Handler {
 
 // Server wraps the HTTP server + App + WebSocket hub.
 type Server struct {
-	app  *App
-	hub  *wsHub
-	http *http.Server
+	app   *App
+	hub   *wsHub
+	http  *http.Server
+	token string // per-process secret; required on all /api/ and /ws/ requests
 }
+
+// Token returns the per-process API secret generated at startup.
+func (s *Server) Token() string { return s.token }
 
 // New creates and configures a Server. Call ListenAndServe to start it.
 // defaultProjectsDir: if non-empty (e.g. Android Downloads path) and Options.ProjectsDirectory
@@ -166,6 +173,15 @@ func New(port int, filesDir string, defaultProjectsDir string) (*Server, error) 
 	// Install mem-logger so GetLog() works.
 	log.SetOutput(GetMemLogger())
 
+	// Generate a per-process secret token. Any app on the device can reach
+	// localhost:port, so the token is the only gate between the API and
+	// other processes running on the same device.
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate API token: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+
 	hub := newHub()
 
 	broadcast := func(ev TranslationEvent) {
@@ -175,7 +191,7 @@ func New(port int, filesDir string, defaultProjectsDir string) (*Server, error) 
 	app := newApp(broadcast)
 
 	mux := http.NewServeMux()
-	s := &Server{app: app, hub: hub}
+	s := &Server{app: app, hub: hub, token: token}
 	s.registerRoutes(mux)
 
 	s.http = &http.Server{
@@ -207,46 +223,67 @@ func (s *Server) Shutdown() {
 	}
 }
 
+// ─── Token middleware ─────────────────────────────────────────────────────────
+
+// apiTokenAuth rejects requests that don't carry the correct X-App-Token header.
+// Uses constant-time comparison to avoid timing side-channels.
+func (s *Server) apiTokenAuth(next http.Handler) http.Handler {
+	expected := []byte(s.token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("X-App-Token")
+		if subtle.ConstantTimeCompare([]byte(got), expected) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // ─── Route registration ───────────────────────────────────────────────────────
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
+	// All /api/ routes are token-protected via a sub-mux.
+	apiMux := http.NewServeMux()
+
 	// Settings
-	mux.HandleFunc("/api/settings", s.handleSettings)
+	apiMux.HandleFunc("/api/settings", s.handleSettings)
 
 	// Projects
-	mux.HandleFunc("/api/projects", s.handleProjects)
-	mux.HandleFunc("/api/projects/load", s.handleLoadProject)
-	mux.HandleFunc("/api/projects/delete", s.handleDeleteProject)
-	mux.HandleFunc("/api/projects/save", s.handleSaveProject)
-	mux.HandleFunc("/api/projects/import-epub", s.handleImportEPUB)
-	mux.HandleFunc("/api/projects/import-spz", s.handleImportSPZ)
-	mux.HandleFunc("/api/projects/export", s.handleExportProject)
-	mux.HandleFunc("/api/projects/export-epub", s.handleExportEPUB)
-	mux.HandleFunc("/api/projects/export-txt", s.handleExportTXT)
-	mux.HandleFunc("/api/projects/cover", s.handleProjectCover)
+	apiMux.HandleFunc("/api/projects", s.handleProjects)
+	apiMux.HandleFunc("/api/projects/load", s.handleLoadProject)
+	apiMux.HandleFunc("/api/projects/delete", s.handleDeleteProject)
+	apiMux.HandleFunc("/api/projects/save", s.handleSaveProject)
+	apiMux.HandleFunc("/api/projects/import-epub", s.handleImportEPUB)
+	apiMux.HandleFunc("/api/projects/import-spz", s.handleImportSPZ)
+	apiMux.HandleFunc("/api/projects/export", s.handleExportProject)
+	apiMux.HandleFunc("/api/projects/export-epub", s.handleExportEPUB)
+	apiMux.HandleFunc("/api/projects/export-txt", s.handleExportTXT)
+	apiMux.HandleFunc("/api/projects/cover", s.handleProjectCover)
 
 	// Paragraphs
-	mux.HandleFunc("/api/paragraphs/batch", s.handleParagraphsBatch)
-	mux.HandleFunc("/api/paragraphs/position", s.handlePosition)
-	mux.HandleFunc("/api/paragraphs/translate", s.handleTranslate)
-	mux.HandleFunc("/api/translation/active", s.handleSetActiveProject)
-	mux.HandleFunc("/api/translation/whole-book", s.handleTranslateWholeBook)
-	mux.HandleFunc("/api/paragraphs/fix", s.handleFixTranslation)
+	apiMux.HandleFunc("/api/paragraphs/batch", s.handleParagraphsBatch)
+	apiMux.HandleFunc("/api/paragraphs/position", s.handlePosition)
+	apiMux.HandleFunc("/api/paragraphs/translate", s.handleTranslate)
+	apiMux.HandleFunc("/api/translation/active", s.handleSetActiveProject)
+	apiMux.HandleFunc("/api/translation/whole-book", s.handleTranslateWholeBook)
+	apiMux.HandleFunc("/api/paragraphs/fix", s.handleFixTranslation)
 
 	// Book details
-	mux.HandleFunc("/api/book", s.handleBook)
-	mux.HandleFunc("/api/book/fetch", s.handleFetchBookDetails)
+	apiMux.HandleFunc("/api/book", s.handleBook)
+	apiMux.HandleFunc("/api/book/fetch", s.handleFetchBookDetails)
 
 	// Glossary
-	mux.HandleFunc("/api/glossary", s.handleGlossary)
+	apiMux.HandleFunc("/api/glossary", s.handleGlossary)
 
 	// Bookmarks
-	mux.HandleFunc("/api/bookmarks", s.handleBookmarks)
+	apiMux.HandleFunc("/api/bookmarks", s.handleBookmarks)
 
 	// Log
-	mux.HandleFunc("/api/log", s.handleLog)
+	apiMux.HandleFunc("/api/log", s.handleLog)
 
-	// WebSocket events
+	mux.Handle("/api/", s.apiTokenAuth(apiMux))
+
+	// WebSocket events — token checked inline via query param
 	mux.HandleFunc("/ws/events", s.handleWS)
 
 	// React SPA — serve embedded frontend/dist
@@ -271,6 +308,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 // ─── WebSocket handler ────────────────────────────────────────────────────────
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
+	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade error: %v", err)

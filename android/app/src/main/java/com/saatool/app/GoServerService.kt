@@ -38,6 +38,7 @@ class GoServerService : Service() {
             try {
                 Log.i(TAG, "Starting Go server in $filesDir, projects in $projectsDir")
                 goServer = Mobile.start(SERVER_PORT.toLong(), filesDir, projectsDir)
+                serverToken = goServer?.getToken() ?: ""
                 Log.i(TAG, "Go server started on port $SERVER_PORT")
             } catch (e: Exception) {
                 Log.e(TAG, "Go server failed to start", e)
@@ -83,6 +84,9 @@ class GoServerService : Service() {
         const val SERVER_PORT = 8766
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "saatool_server"
+
+        /** Set by the server thread once Go's server is running. Read by MainActivity. */
+        @Volatile var serverToken: String = ""
 
         /** Prefer public Downloads so books appear in device Downloads; fall back to app-specific storage. */
         private fun getDefaultProjectsDir(context: Context): String? {

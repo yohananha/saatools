@@ -14,7 +14,6 @@
 
     <application
         android:allowBackup="false"
-        android:requestLegacyExternalStorage="true"
         android:icon="@mipmap/ic_launcher"
         android:label="Babel Reader"
         android:roundIcon="@mipmap/ic_launcher_round"

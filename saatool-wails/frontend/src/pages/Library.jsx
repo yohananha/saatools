@@ -225,7 +225,7 @@ function ImportModal({ onClose, onImported }) {
 }
 
 // ── Book Info Modal ────────────────────────────────────────────────────────
-function BookInfoModal({ info, onClose }) {
+function BookInfoModal({ info, onClose, onUpdate }) {
   const emptyDetails = { title: info.title || info.name, author: '', genre: '', synopsis: '', writingStyle: '', characters: [] }
   const [details, setDetails] = useState(emptyDetails)
   const [fetching, setSaving] = useState(false)   // fetching from AI
@@ -271,6 +271,7 @@ function BookInfoModal({ info, onClose }) {
       const d = await FetchBookDetails(info.path)
       setDetails({ ...emptyDetails, ...d })
       toast('Book details fetched from AI', 'success')
+      onUpdate?.()
     } catch (e) {
       toast(`AI fetch failed: ${e}`, 'error')
     } finally {
@@ -284,6 +285,7 @@ function BookInfoModal({ info, onClose }) {
     try {
       await SaveBookDetailsInfo(info.path, details)
       toast('Book details saved', 'success')
+      onUpdate?.()
       onClose()
     } catch (e) {
       toast(`Save failed: ${e}`, 'error')
@@ -854,6 +856,7 @@ export default function Library({ onOpenReader }) {
         <BookInfoModal
           info={bookInfo}
           onClose={() => setBookInfo(null)}
+          onUpdate={load}
         />
       )}
 

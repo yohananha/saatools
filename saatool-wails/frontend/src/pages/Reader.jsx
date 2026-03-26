@@ -189,6 +189,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // Blocks navigation while a page fetch is in flight — set synchronously in
   // navigate() so a double-tap in the same frame is rejected immediately.
   const navigating = useRef(false)
+  const positionLoaded = useRef(false)
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [translatingSet, setTranslatingSet] = useState(new Set())
@@ -259,10 +260,12 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
   // ── Load last saved position on mount ────────────────────────────────────
   useEffect(() => {
     let cancelled = false
+    positionLoaded.current = false
     GetLastPosition(project.path).then(pos => {
       if (cancelled) return
       setPageStart({ para: pos.index, offset: 0 })
       setIsSource(pos.sourceView)
+      positionLoaded.current = true
     }).catch(() => {})
     return () => { cancelled = true }
   }, [project.path])
@@ -397,6 +400,7 @@ export default function Reader({ project, onBack, theme, onToggleTheme }) {
 
   // ── Save position on page/view change ────────────────────────────────────
   useEffect(() => {
+    if (!positionLoaded.current) return
     SavePosition(project.path, pageStart.para, isSource).catch(() => {})
   }, [project.path, pageStart, isSource])
 

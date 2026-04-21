@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { GetSettings, SaveSettings, OpenFolderDialog, chooseFolderOnAndroid, isWails } from '../api'
+import { GetSettings, SaveSettings, OpenFolderDialog, chooseFolderOnAndroid, isWails, TestNotification } from '../api'
 import { toast } from '../App'
 import Log from './Log'
 
@@ -238,16 +238,28 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
       </div>
 
       <div className="settings-section">
-        <button
-          className="settings-section-title log-toggle-btn"
-          onClick={() => setShowLog(v => !v)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                   width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-                   padding: 0, color: 'inherit' }}
-        >
-          <span>Logs</span>
-          <span style={{ fontSize: 11, opacity: 0.6 }}>{showLog ? '▴ Hide' : '▾ Show'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button
+            className="settings-section-title log-toggle-btn"
+            onClick={() => setShowLog(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8,
+                     background: 'none', border: 'none', cursor: 'pointer',
+                     padding: 0, color: 'inherit', flex: 1 }}
+          >
+            <span>Logs</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>{showLog ? '▴ Hide' : '▾ Show'}</span>
+          </button>
+          <button
+            className="btn"
+            style={{ fontSize: 11 }}
+            onClick={() => {
+              TestNotification()
+              toast('Test notification sent to ntfy.sh', 'success')
+            }}
+          >
+            Test notification
+          </button>
+        </div>
         {showLog && (
           <div className="settings-card" style={{ marginTop: 8 }}>
             <Log inline />

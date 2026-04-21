@@ -1286,6 +1286,11 @@ func (a *App) GetLog() []string {
 	return GetMemLogger().GetLines()
 }
 
+// TestNotification sends a test error notification immediately, bypassing the cooldown.
+func (a *App) TestNotification() {
+	GetMemLogger().SendTestNotification()
+}
+
 // ─── File dialogs ────────────────────────────────────────────────────────────
 
 // defaultExportDir returns a directory outside the projects folder for export save dialogs,

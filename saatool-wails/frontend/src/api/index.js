@@ -381,6 +381,10 @@ export const GetLog = () =>
   isWails() ? WailsApp.GetLog()
             : apiFetch('GET', '/api/log')
 
+export const TestNotification = () =>
+  isWails() ? WailsApp.TestNotification()
+            : apiFetch('POST', '/api/log/test-notification')
+
 // ── Translation events ────────────────────────────────────────────────────
 
 /**

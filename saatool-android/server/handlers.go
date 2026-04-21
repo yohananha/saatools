@@ -923,3 +923,12 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, lines)
 }
+
+func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	s.app.TestNotification()
+	writeJSON(w, map[string]string{"status": "sent"})
+}

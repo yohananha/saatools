@@ -965,6 +965,11 @@ func (a *App) GetLog() []string {
 	return GetMemLogger().GetLines()
 }
 
+// TestNotification sends a test error notification immediately, bypassing the cooldown.
+func (a *App) TestNotification() {
+	GetMemLogger().SendTestNotification()
+}
+
 // ─── Cover helpers ────────────────────────────────────────────────────────────
 
 func coverPathForProject(projectPath string) (string, bool) {

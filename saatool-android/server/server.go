@@ -280,6 +280,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Log
 	apiMux.HandleFunc("/api/log", s.handleLog)
+	apiMux.HandleFunc("/api/log/test-notification", s.handleTestNotification)
 
 	mux.Handle("/api/", s.apiTokenAuth(apiMux))
 

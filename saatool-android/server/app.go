@@ -68,6 +68,7 @@ type Settings struct {
 	TargetLanguage            string `json:"targetLanguage"`
 	DarkMode                  bool   `json:"darkMode"`
 	FixModel                  string `json:"fixModel"`
+	TranslateModel            string `json:"translateModel"`
 	MaxConcurrentTranslations int    `json:"maxConcurrentTranslations"`
 	TranslationBatchSize      int    `json:"translationBatchSize"`
 	ProjectsDirectory        string `json:"projectsDirectory"`
@@ -239,6 +240,7 @@ func (a *App) GetSettings() Settings {
 		TargetLanguage:            config.Options.TargetLanguage,
 		DarkMode:                  config.Options.DarkMode,
 		FixModel:                  config.Options.FixModel,
+		TranslateModel:            config.Options.TranslateModel,
 		MaxConcurrentTranslations: config.Options.MaxConcurrentTranslations,
 		TranslationBatchSize:      config.Options.TranslationBatchSize,
 		ProjectsDirectory:         config.Options.ProjectsDirectory,
@@ -259,6 +261,9 @@ func (a *App) SaveSettings(s Settings) error {
 	}
 	if s.FixModel != "" && s.FixModel != "deepseek-chat" && s.FixModel != "deepseek-reasoner" {
 		return fmt.Errorf("fixModel must be \"deepseek-chat\" or \"deepseek-reasoner\"")
+	}
+	if s.TranslateModel != "" && s.TranslateModel != "deepseek-chat" && s.TranslateModel != "deepseek-reasoner" {
+		return fmt.Errorf("translateModel must be \"deepseek-chat\" or \"deepseek-reasoner\"")
 	}
 	if s.MaxConcurrentTranslations < 1 || s.MaxConcurrentTranslations > 8 {
 		return fmt.Errorf("maxConcurrentTranslations must be between 1 and 8")
@@ -291,6 +296,7 @@ func (a *App) SaveSettings(s Settings) error {
 	config.Options.TargetLanguage = strings.TrimSpace(s.TargetLanguage)
 	config.Options.DarkMode = s.DarkMode
 	config.Options.FixModel = strings.TrimSpace(s.FixModel)
+	config.Options.TranslateModel = strings.TrimSpace(s.TranslateModel)
 	config.Options.MaxConcurrentTranslations = s.MaxConcurrentTranslations
 	config.Options.TranslationBatchSize = s.TranslationBatchSize
 	config.Options.ProjectsDirectory = strings.TrimSpace(s.ProjectsDirectory)

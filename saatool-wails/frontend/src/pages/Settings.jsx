@@ -205,6 +205,16 @@ export default function Settings({ theme, onThemeChange, onNavigateTo }) {
             onChange={e => set('translationBatchSize', parseInt(e.target.value, 10) || 1)}
           />
         </Row>
+        <Row label="Translate model" hint="Model used for ongoing translation and whole-book translate">
+          <select
+            className="settings-input"
+            value={s.translateModel || 'deepseek-chat'}
+            onChange={e => set('translateModel', e.target.value)}
+          >
+            <option value="deepseek-chat">Chat (fast)</option>
+            <option value="deepseek-reasoner">Reasoner (thorough)</option>
+          </select>
+        </Row>
         <Row label="Fix model" hint="Model used when tapping the Fix button">
           <select
             className="settings-input"
